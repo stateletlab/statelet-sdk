@@ -40,6 +40,22 @@ def _to_bytes(key: Union[str, bytes]) -> bytes:
     return key.encode("utf-8") if isinstance(key, str) else key
 
 
+def _default_mgmt_addr(addr: str) -> str:
+    """The management API address implied by a gateway address.
+
+    The gateway serves gRPC on one port and the management HTTP API on the next
+    one up — 9379 and 9380 by default. Deriving that by rewriting the literal
+    ":9379" worked only on the default port: anywhere else the substring was
+    absent, the replace did nothing, and login sent an HTTP request to the gRPC
+    listener, which answers by resetting the connection. The traceback that
+    produced named neither the port nor the cause.
+    """
+    host, sep, port = addr.rpartition(":")
+    if not sep or not port.isdigit():
+        return addr
+    return f"{host}:{int(port) + 1}"
+
+
 def _login(mgmt_addr: str, username: str, password: str) -> str:
     """Obtain a JWT token from the gateway management API."""
     url = f"http://{mgmt_addr}/api/v1/auth/login"
@@ -274,7 +290,7 @@ class Client:
     ) -> None:
         # Auto-login if username/password provided
         if token is None and username is not None:
-            _mgmt = mgmt_addr or addr.replace(":9379", ":9380")
+            _mgmt = mgmt_addr or _default_mgmt_addr(addr)
             token = _login(_mgmt, username, password or "")
         if token:
             interceptor = _AuthInterceptor(token)
@@ -737,7 +753,7 @@ class AsyncClient:
         mgmt_addr: Optional[str] = None,
     ) -> None:
         if token is None and username is not None:
-            _mgmt = mgmt_addr or addr.replace(":9379", ":9380")
+            _mgmt = mgmt_addr or _default_mgmt_addr(addr)
             token = _login(_mgmt, username, password or "")
         if token:
             metadata = [("authorization", f"Bearer {token}")]
