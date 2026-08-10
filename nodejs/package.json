@@ -1,6 +1,6 @@
 {
   "name": "statelet-sdk",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "TypeScript gRPC client for Statelet distributed key-value store",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
