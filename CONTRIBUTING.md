@@ -72,13 +72,25 @@ source tarball attached to the GitHub Release for its tag.
 `langchain-statelet` is an integration package, not an SDK, and keeps its own
 `release-langchain.yml` (tag `langchain-v0.1.0`).
 
-### Rehearsing a release
+### Releasing from the Actions tab instead
 
 `release.yml` also takes a manual `workflow_dispatch` with an SDK list and a `dry_run`
-flag that defaults to on. A dry run builds, tests and packages everything a real release
-would, and stops short of publishing. Turning `dry_run` off on a dispatch publishes
-whatever version is currently committed — there is no tag to check it against — so
-prefer the tag path for anything real.
+flag that defaults to on. With `dry_run` off it publishes and then **creates the tags
+itself**, one per SDK, derived from that SDK's own manifest — so the two tag-only SDKs
+are releasable this way too, and the other four still end up with a ref you can point at.
+
+Tags are created after the publish jobs succeed, never before, so a tag cannot end up
+claiming a release that failed halfway. If a tag already exists the job leaves it alone
+and says so.
+
+Go needs one extra input, `go_version`. Every other SDK declares its version in a file
+this workflow can read; a Go module declares its version nowhere — the `go/vX.Y.Z` tag
+*is* the version — so there is nothing to derive one from. Releasing Go from a dispatch
+without it fails early rather than guessing.
+
+The tradeoff versus the tag path: a dispatch has no tag to check the manifests against,
+so it publishes whatever version is currently committed. The tag path verifies the two
+agree before anything is uploaded.
 
 ### Publishing credentials
 
