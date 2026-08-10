@@ -54,9 +54,9 @@ workflow refuses a mismatch.
 | SDK | Tag | Registry | Version comes from |
 |---|---|---|---|
 | `statelet` | `python-v0.1.1` | PyPI | `python/pyproject.toml` |
-| `statelet-client` (npm) | `nodejs-v0.1.0` | npm | `nodejs/package.json` |
-| `statelet-client` (crate) | `rust-v0.1.0` | crates.io | `rust/Cargo.toml` |
-| `ai.statelet:statelet-client` | `java-v0.1.0` | Maven Central | `java/pom.xml` |
+| `statelet-sdk` (npm) | `nodejs-v0.1.0` | npm | `nodejs/package.json` |
+| `statelet-sdk` (crate) | `rust-v0.1.0` | crates.io | `rust/Cargo.toml` |
+| `ai.statelet:statelet-sdk` | `java-v0.1.0` | Maven Central | `java/pom.xml` |
 | Go module | `go/v0.1.0` | none — the proxy serves tags | the tag itself |
 | C++ | `cpp-v0.1.0` | none — tarball on the GitHub Release | `cpp/CMakeLists.txt` |
 

@@ -6,7 +6,7 @@ Async Rust gRPC client for the [Statelet](https://github.com/stateletlab/statele
 
 ```toml
 [dependencies]
-statelet-client = { git = "https://github.com/stateletlab/statelet-sdk", branch = "main" }
+statelet-sdk = { git = "https://github.com/stateletlab/statelet-sdk", branch = "main" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ```
 

@@ -20,7 +20,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "statelet>=0.1.0",
+    "statelet-sdk>=0.1.1",
     "langchain-core>=0.2",
 ]
 

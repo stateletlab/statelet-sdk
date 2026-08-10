@@ -5,8 +5,12 @@ Agent memory with KV, vector search, and temporal causal graphs — in one datab
 ## Quick Start
 
 ```bash
-pip install statelet
+pip install statelet-sdk
 ```
+
+`statelet-sdk` is the client on its own. `pip install statelet` gets you the
+same library plus the server binaries, and is the better choice if you also
+want to run a node locally.
 
 ### High-Level Client
 

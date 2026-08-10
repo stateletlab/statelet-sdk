@@ -9,10 +9,10 @@ All six SDKs wrap the same gRPC contract: [`proto/statelet.proto`](proto/statele
 | Language | Directory | Package | Transport |
 |---|---|---|---|
 | Python | [`python/`](python/) | `statelet` (PyPI) | grpcio |
-| Node.js / TypeScript | [`nodejs/`](nodejs/) | `statelet-client` (npm) | `@grpc/grpc-js` |
+| Node.js / TypeScript | [`nodejs/`](nodejs/) | `statelet-sdk` (npm) | `@grpc/grpc-js` |
 | Go | [`go/`](go/) | `github.com/stateletlab/statelet-sdk/go` | grpc-go |
-| Rust | [`rust/`](rust/) | `statelet-client` | tonic |
-| Java | [`java/`](java/) | `ai.statelet:statelet-client` | grpc-java + Netty |
+| Rust | [`rust/`](rust/) | `statelet-sdk` | tonic |
+| Java | [`java/`](java/) | `ai.statelet:statelet-sdk` | grpc-java + Netty |
 | C++ | [`cpp/`](cpp/) | `statelet_client` (CMake) | gRPC C++ |
 
 Plus [`python/langchain-statelet/`](python/langchain-statelet/) — a LangChain integration
@@ -21,8 +21,8 @@ Plus [`python/langchain-statelet/`](python/langchain-statelet/) — a LangChain 
 ## Quick start
 
 ```bash
-pip install statelet                                  # Python
-npm install statelet-client                           # Node.js
+pip install statelet-sdk                           # Python
+npm install statelet-sdk                           # Node.js
 go get github.com/stateletlab/statelet-sdk/go@latest  # Go
 ```
 
