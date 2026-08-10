@@ -82,15 +82,23 @@ prefer the tag path for anything real.
 
 ### Publishing credentials
 
-PyPI uses trusted publishing: no token is stored here. The pending publisher at
-<https://pypi.org/manage/account/publishing/> must name **`release.yml`** as the
-workflow — it is keyed on the filename, and this replaced the old `release-python.yml`.
+PyPI and npm both use trusted publishing, so neither stores a token here. Both are keyed
+on the workflow **filename**, `release.yml`, so renaming this file breaks them until the
+registry-side entry is updated to match.
+
+- PyPI: <https://pypi.org/manage/account/publishing/> (a *pending* publisher until the
+  first release creates the project, then it converts on its own)
+- npm: <https://www.npmjs.com/package/statelet-sdk/access> — owner `stateletlab`,
+  repository `statelet-sdk`, workflow `release.yml`, environment `npm`
+
+npm has no equivalent of PyPI's pending publishers: a trusted publisher can only be
+attached to a package that already exists, so `statelet-sdk@0.1.0` was published by hand
+to get past the chicken-and-egg. Nothing after it needs a token.
 
 The rest are repository secrets:
 
 | Secret | Used by |
 |---|---|
-| `NPM_TOKEN` | npm (an automation token; provenance is signed via OIDC separately) |
 | `CARGO_REGISTRY_TOKEN` | crates.io |
 | `MAVEN_CENTRAL_USERNAME` / `MAVEN_CENTRAL_PASSWORD` | Maven Central — Portal tokens, not the account password |
 | `MAVEN_GPG_PRIVATE_KEY` / `MAVEN_GPG_PASSPHRASE` | Maven Central artifact signing; the key must be published to a keyserver |
