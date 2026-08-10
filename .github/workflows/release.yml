@@ -11,15 +11,28 @@ name: Release SDKs
 #   go       github.com/stateletlab/statelet-sdk/go   -> the tag itself; there is no registry
 #   cpp      source tarball                           -> GitHub Release; there is no registry
 #
-# Versions are per-SDK, not lockstep. Release one by pushing its tag:
+# There are two ways in, and the difference is which one owns the version.
 #
-#   git tag python-v0.1.1 && git push origin python-v0.1.1
-#   git tag go/v0.1.0     && git push origin go/v0.1.0      # the go/ prefix is mandatory
+# 1. Actions -> Run workflow, with `sdks` and `version`. The version is written
+#    into every selected manifest, committed, and only then built — so one
+#    field sets all six and no manifest is edited by hand. Leaving `version`
+#    empty releases whatever the manifests already say.
 #
-# The manual workflow_dispatch path exists for re-runs and rehearsals. It
-# defaults to dry_run, because without a tag there is nothing to check the
-# manifest version against and an unguarded dispatch would publish whatever
-# version happens to be committed.
+# 2. Push a tag. Here the manifest is already the source of truth and the tag
+#    only has to agree with it; a mismatch fails before anything is uploaded.
+#
+#      git tag python-v0.1.1 && git push origin python-v0.1.1
+#      git tag go/v0.1.0     && git push origin go/v0.1.0   # go/ prefix required
+#
+# Versions stay per-SDK either way: `sdks` decides who moves, so releasing two
+# at one version and leaving the rest behind is the normal case, not a
+# workaround. dry_run defaults to on.
+#
+# The bump commit is pushed with GITHUB_TOKEN, which by design raises no events
+# — that is what stops this workflow retriggering itself on its own commit, and
+# it also means CI does not run on that commit. The release jobs build and test
+# it directly, so it is not shipped unverified, but the commit will show no
+# check marks on the branch.
 #
 # Secrets and one-time setup are listed under "Publishing credentials" in
 # CONTRIBUTING.md. langchain-statelet is NOT here — it is an integration
@@ -36,8 +49,8 @@ on:
         description: 'Build, test and verify, but do not publish anything'
         type: boolean
         default: true
-      go_version:
-        description: 'Version to tag Go at, e.g. 0.1.0. Required only when releasing go, which has no manifest to read one from.'
+      version:
+        description: 'Version to release, e.g. 0.2.0. Written into every selected SDK''s manifest and committed before anything is built. Leave empty to release whatever the manifests already say.'
         type: string
         default: ''
   push:
@@ -72,6 +85,9 @@ jobs:
       cpp: ${{ steps.select.outputs.cpp }}
       version: ${{ steps.select.outputs.version }}
       dry_run: ${{ steps.select.outputs.dry_run }}
+      sha: ${{ steps.sha.outputs.sha }}
+    permissions:
+      contents: write   # to commit the version bump
     steps:
       - uses: actions/checkout@v4
 
@@ -88,9 +104,10 @@ jobs:
           REF: ${{ github.ref_name }}
           INPUT_SDKS: ${{ inputs.sdks }}
           INPUT_DRY: ${{ inputs.dry_run }}
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          version=""
+          version="${INPUT_VERSION:-}"
 
           if [ "$EVENT" = "push" ]; then
             dry_run=false
@@ -117,6 +134,7 @@ jobs:
           done
           echo "version=$version"   >> "$GITHUB_OUTPUT"
           echo "dry_run=$dry_run"   >> "$GITHUB_OUTPUT"
+          echo "selected=$selected" >> "$GITHUB_OUTPUT"
 
           {
             echo "### Release plan"
@@ -128,9 +146,58 @@ jobs:
             echo "| Publish | $([ "$dry_run" = "true" ] && echo 'no — dry run' || echo '**yes**') |"
           } >> "$GITHUB_STEP_SUMMARY"
 
-          if [ "$EVENT" != "push" ] && [ "$dry_run" != "true" ]; then
-            echo "::warning::Publishing from a manual dispatch. There is no tag to check the manifest versions against."
+          if [ "$EVENT" != "push" ] && [ "$dry_run" != "true" ] && [ -z "$version" ]; then
+            echo "::warning::No version given, so this publishes whatever the manifests currently say and nothing cross-checks them."
           fi
+
+      # The version has to be committed, not just written: an artifact built
+      # from an uncommitted edit corresponds to no revision anyone can check
+      # out, so `git checkout <tag>` would rebuild a different version than the
+      # one on the registry. Everything downstream is then pinned to the commit
+      # this makes, which is why plan exports a sha at all.
+      #
+      # A tag push never gets here. There the manifest is already the source of
+      # truth and the per-job check enforces that the tag agrees with it.
+      - name: Apply the version to every selected manifest
+        if: github.event_name == 'workflow_dispatch' && inputs.version != '' && steps.select.outputs.dry_run != 'true'
+        env:
+          VERSION: ${{ inputs.version }}
+          SELECTED: ${{ steps.select.outputs.selected }}
+        run: |
+          set -euo pipefail
+          IFS=, read -ra sdks <<< "$SELECTED"
+          for sdk in "${sdks[@]}"; do
+            ./scripts/set-sdk-version.sh "$sdk" "$VERSION"
+          done
+
+          if git diff --quiet; then
+            echo "manifests already at $VERSION; nothing to commit"
+            exit 0
+          fi
+
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -aqm "release: $SELECTED $VERSION"
+          git push origin "HEAD:$GITHUB_REF_NAME"
+          echo "committed $VERSION to $GITHUB_REF_NAME"
+
+      - name: Rehearse the version change
+        if: github.event_name == 'workflow_dispatch' && inputs.version != '' && steps.select.outputs.dry_run == 'true'
+        env:
+          VERSION: ${{ inputs.version }}
+          SELECTED: ${{ steps.select.outputs.selected }}
+        run: |
+          set -euo pipefail
+          IFS=, read -ra sdks <<< "$SELECTED"
+          for sdk in "${sdks[@]}"; do
+            ./scripts/set-sdk-version.sh "$sdk" "$VERSION"
+          done
+          echo "::notice::Dry run: the manifests above were rewritten in the runner and thrown away. Nothing was committed, and the jobs below build the versions currently on $GITHUB_REF_NAME."
+          git checkout -- .
+
+      - name: Resolve the commit everything else builds from
+        id: sha
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   # ── python -> PyPI ──────────────────────────────────────────────────────────
   # Trusted publishing: no API token lives in this repository. The pending
@@ -151,6 +218,8 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -186,6 +255,8 @@ jobs:
       id-token: write   # provenance attestation; not authentication
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
       # Node 22 and npm >= 11.5.1 are hard floors for trusted publishing: older
       # CLIs have no OIDC exchange and fall back to looking for a token that is
       # deliberately no longer here. Node 22 ships npm 10, hence the upgrade.
@@ -245,6 +316,8 @@ jobs:
     environment: crates-io
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -286,6 +359,8 @@ jobs:
     environment: maven-central
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
       - uses: actions/setup-java@v4
         with:
           java-version: '17'
@@ -335,6 +410,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
       - uses: actions/setup-go@v5
         with:
           go-version: '1.22'
@@ -381,17 +458,21 @@ jobs:
           done
           echo "::warning::proxy.golang.org has not picked up $mod@v$VERSION yet. The tag is pushed, so it will resolve on its own; nothing is broken."
 
+      # The version input is optional for the other five, which fall back to
+      # what their manifests already say. Go has no such fallback: there is no
+      # field anywhere in a Go module that records its own version, so with the
+      # input empty there is simply nothing to name a tag after.
       - name: Require a version when releasing Go from a dispatch
         if: github.event_name != 'push' && needs.plan.outputs.dry_run != 'true'
         env:
-          GO_VERSION: ${{ inputs.go_version }}
+          VERSION: ${{ needs.plan.outputs.version }}
         run: |
           set -euo pipefail
-          if [ -z "$GO_VERSION" ]; then
-            echo "::error::Releasing Go needs the go_version input. A Go module declares no version anywhere in its tree — the go/vX.Y.Z tag IS the version — so unlike the other five SDKs there is no manifest to read one from." >&2
+          if [ -z "$VERSION" ]; then
+            echo "::error::Releasing Go needs the version input. A Go module declares no version anywhere in its tree — the go/vX.Y.Z tag IS the version — so unlike the other five SDKs there is no manifest to fall back to." >&2
             exit 1
           fi
-          echo "will be tagged go/v$GO_VERSION by the tag job"
+          echo "will be tagged go/v$VERSION by the tag job"
 
   # ── cpp -> GitHub Release tarball ───────────────────────────────────────────
   # No package registry to target. Consumers vendor the tree or point
@@ -406,6 +487,8 @@ jobs:
       contents: write   # attaching an asset to the GitHub Release
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
 
       - name: Install gRPC and Protobuf
         run: |
@@ -499,6 +582,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
 
       - name: Create and push the tags
         env:
@@ -508,7 +593,7 @@ jobs:
           SEL_GO: ${{ needs.plan.outputs.go }}
           SEL_JAVA: ${{ needs.plan.outputs.java }}
           SEL_CPP: ${{ needs.plan.outputs.cpp }}
-          GO_VERSION: ${{ inputs.go_version }}
+          GO_VERSION: ${{ needs.plan.outputs.version }}
         run: |
           set -euo pipefail
           git config user.name  'github-actions[bot]'
@@ -521,10 +606,14 @@ jobs:
 
             if [ "$sdk" = 'go' ]; then
               # No manifest to read; the go job already refused to get this far
-              # with an empty go_version.
+              # with an empty version.
               version="$GO_VERSION"
               tag="go/v$version"
             else
+              # Read from the manifest rather than trusting the input: the
+              # checkout is pinned to the commit plan produced, so this is the
+              # version that was actually built, whether plan wrote it or it was
+              # already there.
               version="$(./scripts/sdk-version.sh "$sdk")"
               tag="$sdk-v$version"
             fi
@@ -555,7 +644,7 @@ jobs:
       - name: Warm the module proxy
         if: needs.plan.outputs.go == 'true'
         env:
-          VERSION: ${{ inputs.go_version }}
+          VERSION: ${{ needs.plan.outputs.version }}
         run: |
           set -euo pipefail
           mod='github.com/stateletlab/statelet-sdk/go'

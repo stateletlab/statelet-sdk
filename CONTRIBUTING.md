@@ -74,23 +74,42 @@ source tarball attached to the GitHub Release for its tag.
 
 ### Releasing from the Actions tab instead
 
-`release.yml` also takes a manual `workflow_dispatch` with an SDK list and a `dry_run`
-flag that defaults to on. With `dry_run` off it publishes and then **creates the tags
-itself**, one per SDK, derived from that SDK's own manifest — so the two tag-only SDKs
-are releasable this way too, and the other four still end up with a ref you can point at.
+**Actions → Release SDKs → Run workflow** is the other way in, and it inverts who owns
+the version: instead of editing manifests and then tagging to match, you give it `sdks`
+and `version` and it does both.
+
+| field | |
+|---|---|
+| `sdks` | `all`, or a comma-separated subset |
+| `version` | e.g. `0.2.0`. Written into every selected manifest, committed, and only then built. Empty releases whatever the manifests already say. |
+| `dry_run` | on by default |
+
+One field sets all six, so a lockstep release needs no hand-editing. Versions are still
+per-SDK — `sdks` decides who moves — so bumping two and leaving the rest behind is the
+normal case rather than a workaround.
+
+`scripts/set-sdk-version.sh` does the writing (`sdk-version.sh` reads it back to confirm),
+and it moves lockfiles with their manifests: `npm ci` and `cargo publish` both compare the
+two and fail on a mismatch, so a bumped `package.json` with a stale `package-lock.json`
+breaks the *next* release rather than this one.
+
+**The version is committed, not just written.** An artifact built from an uncommitted edit
+corresponds to no revision anyone can check out, so `git checkout <tag>` would rebuild a
+different version than the one on the registry. Every job after `plan` is pinned to the
+commit `plan` produced, and the tags are cut from it too.
+
+That commit is pushed with `GITHUB_TOKEN`, which raises no events — which is what stops
+the workflow retriggering itself, and also means CI does not run on it. The release jobs
+build and test that commit directly, so nothing ships unverified, but expect no check
+marks against it on the branch.
 
 Tags are created after the publish jobs succeed, never before, so a tag cannot end up
-claiming a release that failed halfway. If a tag already exists the job leaves it alone
-and says so.
+claiming a release that failed halfway. An existing tag is left alone with a warning.
 
-Go needs one extra input, `go_version`. Every other SDK declares its version in a file
-this workflow can read; a Go module declares its version nowhere — the `go/vX.Y.Z` tag
-*is* the version — so there is nothing to derive one from. Releasing Go from a dispatch
-without it fails early rather than guessing.
-
-The tradeoff versus the tag path: a dispatch has no tag to check the manifests against,
-so it publishes whatever version is currently committed. The tag path verifies the two
-agree before anything is uploaded.
+Go needs `version` where the others treat it as optional. Every other SDK can fall back to
+its manifest; a Go module records its version nowhere — the `go/vX.Y.Z` tag *is* the
+version — so with the field empty there is nothing to name a tag after, and the job says
+so instead of guessing.
 
 ### Publishing credentials
 
