@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "langchain-statelet"
+version = "0.1.0"
+description = "LangChain integration for Statelet — VectorStore, ChatHistory, and GraphStore backed by a single self-hosted engine."
+readme = "README.md"
+license = {text = "Apache-2.0"}
+requires-python = ">=3.9"
+authors = [{name = "Statelet"}]
+keywords = ["langchain", "statelet", "vector-store", "graph-store", "chat-history", "ai-memory"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Database",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "statelet>=0.1.0",
+    "langchain-core>=0.2",
+]
+
+[project.optional-dependencies]
+graph = ["langchain-community>=0.2"]
+dev = [
+    "pytest>=7",
+    "ruff>=0.4",
+    "langchain-community>=0.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/stateletlab/statelet-sdk"
+Repository = "https://github.com/stateletlab/statelet-sdk"
+Issues = "https://github.com/stateletlab/statelet-sdk/issues"
+Documentation = "https://statelet.com"
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

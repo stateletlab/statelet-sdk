@@ -1,0 +1,23 @@
+[package]
+name = "statelet-client"
+version = "0.1.0"
+edition = "2021"
+description = "Rust gRPC client for Statelet distributed key-value store"
+license = "Apache-2.0"
+repository = "https://github.com/stateletlab/statelet-sdk"
+homepage = "https://statelet.com"
+readme = "README.md"
+keywords = ["statelet", "grpc", "database", "vector-search", "client"]
+categories = ["database", "api-bindings"]
+# The vendored proto is a build input, so it has to be inside the published
+# crate; without this the packaged crate fails to compile at build.rs time.
+include = ["src/**", "build.rs", "proto/**", "README.md"]
+
+[dependencies]
+tonic = "0.12"
+prost = "0.13"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+[build-dependencies]
+tonic-build = "0.12"
+protoc-bin-vendored = "3"

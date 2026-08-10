@@ -1,0 +1,74 @@
+name: Release langchain-statelet (PyPI)
+
+# Trusted publishing, same as release-python.yml. Add a second pending publisher
+# at https://pypi.org/manage/account/publishing/ with
+#   project: langchain-statelet · owner: stateletlab · repo: statelet-sdk
+#   workflow: release-langchain.yml · environment: pypi
+
+on:
+  push:
+    tags:
+      - "langchain-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify the tag matches the declared version
+        if: startsWith(github.ref, 'refs/tags/langchain-v')
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#langchain-v}"
+          PKG_VERSION="$(grep -m1 '^version' python/langchain-statelet/pyproject.toml | cut -d'"' -f2)"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match pyproject version $PKG_VERSION" >&2
+            exit 1
+          fi
+          echo "releasing langchain-statelet $PKG_VERSION"
+
+      - name: Lint
+        working-directory: python/langchain-statelet
+        run: |
+          pip install -e ../
+          pip install -e ".[dev]"
+          ruff check langchain_statelet/
+          ruff format --check langchain_statelet/
+
+      - name: Build
+        working-directory: python/langchain-statelet
+        run: |
+          pip install build twine
+          python -m build
+          twine check dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: langchain-statelet-dist
+          path: python/langchain-statelet/dist/*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: langchain-statelet-dist
+          path: dist
+
+      - run: ls -lh dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/

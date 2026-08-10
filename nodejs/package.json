@@ -1,0 +1,45 @@
+{
+  "name": "statelet-client",
+  "version": "0.1.0",
+  "description": "TypeScript gRPC client for Statelet distributed key-value store",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "proto",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test \"test/**/*.test.js\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/stateletlab/statelet-sdk.git",
+    "directory": "nodejs"
+  },
+  "homepage": "https://github.com/stateletlab/statelet-sdk/tree/main/nodejs#readme",
+  "bugs": {
+    "url": "https://github.com/stateletlab/statelet-sdk/issues"
+  },
+  "keywords": [
+    "statelet",
+    "grpc",
+    "database",
+    "vector-search",
+    "nodejs",
+    "typescript"
+  ],
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@grpc/grpc-js": "^1.14.0",
+    "@grpc/proto-loader": "^0.8.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "typescript": "^5.9.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

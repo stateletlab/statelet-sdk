@@ -1,0 +1,5 @@
+# The generated gRPC stubs under statelet/proto/ ARE checked in, deliberately.
+# Go resolves a module by serving the git tree — there is no install-time build
+# step — so a consumer running `go get github.com/stateletlab/statelet-sdk/go`
+# gets exactly what is committed. Ignoring the stubs would ship a module that
+# does not compile. Regenerate with `make proto` and commit the result.
