@@ -5,7 +5,7 @@ name: Release SDKs
 # — not the publishing mechanics, which have nothing in common:
 #
 #   python   statelet-sdk                             -> PyPI          (OIDC, no token)
-#   nodejs   statelet-sdk                             -> npm           (NPM_TOKEN)
+#   nodejs   statelet-sdk                             -> npm           (OIDC, no token)
 #   rust     statelet-sdk                             -> crates.io     (CARGO_REGISTRY_TOKEN)
 #   java     ai.statelet:statelet-sdk                 -> Maven Central (portal token + GPG)
 #   go       github.com/stateletlab/statelet-sdk/go   -> the tag itself; there is no registry
@@ -182,10 +182,18 @@ jobs:
       id-token: write   # provenance attestation; not authentication
     steps:
       - uses: actions/checkout@v4
+      # Node 22 and npm >= 11.5.1 are hard floors for trusted publishing: older
+      # CLIs have no OIDC exchange and fall back to looking for a token that is
+      # deliberately no longer here. Node 22 ships npm 10, hence the upgrade.
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           registry-url: 'https://registry.npmjs.org'
+
+      - name: Upgrade npm for trusted publishing
+        run: |
+          npm install -g npm@latest
+          npm --version
 
       - run: ./scripts/sdk-version.sh nodejs '${{ needs.plan.outputs.version }}'
 
@@ -210,12 +218,19 @@ jobs:
             exit 1
           fi
 
+      # No token. npm's trusted publisher for statelet-sdk names this repository,
+      # this workflow FILENAME and the `npm` environment, and the OIDC token
+      # minted for this job carries exactly those claims. Provenance is signed
+      # off the same id-token, so --provenance costs nothing extra here.
+      #
+      # Trusted publishing cannot perform a package's FIRST publish — npm has no
+      # equivalent of PyPI's pending publishers, so the publisher can only be
+      # attached to a package that already exists. statelet-sdk@0.1.0 was pushed
+      # by hand to get past that; every release from 0.1.1 on runs here.
       - name: Publish
         if: needs.plan.outputs.dry_run != 'true'
         working-directory: nodejs
         run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   # ── rust -> crates.io ───────────────────────────────────────────────────────
   rust:
