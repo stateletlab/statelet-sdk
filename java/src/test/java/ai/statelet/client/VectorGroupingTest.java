@@ -17,8 +17,8 @@ package ai.statelet.client;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import statelet.Statelet.VectorSearchRequest;
-import statelet.Statelet.VectorSearchResult;
+import statelet.v1.StateletProto.VectorSearchRequest;
+import statelet.v1.StateletProto.VectorSearchResult;
 import com.google.protobuf.InvalidProtocolBufferException;
 import org.junit.jupiter.api.Test;
 

@@ -1,6 +1,9 @@
 name: Release langchain-statelet (PyPI)
 
-# Trusted publishing, same as release-python.yml. Add a second pending publisher
+# langchain-statelet is an integration package, not one of the six SDKs, so it
+# stays out of release.yml and keeps its own tag series.
+#
+# Trusted publishing, same as the Python SDK. Add a second pending publisher
 # at https://pypi.org/manage/account/publishing/ with
 #   project: langchain-statelet · owner: stateletlab · repo: statelet-sdk
 #   workflow: release-langchain.yml · environment: pypi

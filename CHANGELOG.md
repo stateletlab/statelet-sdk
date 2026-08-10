@@ -36,9 +36,7 @@ is unchanged; what moved, and what that breaks, is listed below.
   `../../proto/statelet.proto`, outside the crate directory, so a packaged crate would
   fail at build time. The proto is now vendored at `rust/proto/` and listed in `include`.
 
-### Known issues
-
-- **The Java SDK does not compile against the current proto.** `java/` had been pinned to
+- **The Java SDK did not compile against the current proto.** `java/` had been pinned to
   a stale vendored proto (3137 lines, against the engine's 4736); syncing it to the real
   contract surfaced a name collision that only the Java codegen hits:
 
@@ -48,14 +46,28 @@ is unchanged; what moved, and what that breaks, is listed below.
   ```
 
   protoc-gen-java emits `get<Field>Value()` for an enum field, so `condition` and
-  `condition_value` produce two methods with the same signature and the generated file is
-  rejected by javac. It affects `ConditionalBatchWriteRequest` and
-  `AgentStateConditionalWriteRequest`. The other five languages are unaffected — this is
+  `condition_value` produced two methods with the same signature and javac rejected the
+  generated file. It affected `ConditionalBatchWriteRequest` and
+  `AgentStateConditionalWriteRequest`; the other five languages are unaffected — this is
   the Java analogue of the `has_edge` collision that previously broke the C++ codegen.
 
-  The fix is a field rename in the **engine** repository, which owns the contract, and is
-  wire-compatible as long as the field numbers stay put. Until then the `java` CI job
-  fails, deliberately: pinning the SDK back to a stale proto would only re-hide it.
+  Fixed here rather than in the engine: **protoc 30 and newer detect the collision and
+  disambiguate by field number**, so the bytes accessor becomes `getConditionValue3()`
+  and the enum keeps `getConditionValue()`. Raising `protobuf.version` from `3.25.3` to
+  `4.31.1` is therefore the whole fix — no proto edit, no field rename, no change to the
+  other five SDKs, and the wire format is untouched. `protobuf.version` now carries a
+  comment recording that 4.30 is a floor, not a preference.
+
+  A field rename in the engine remains the tidier long-term answer, since
+  `getConditionValue3()` is an unlovely name to hand a caller, but it is no longer
+  blocking. Nothing in `ai.statelet.client` calls these accessors — only code driving the
+  generated stubs directly is affected.
+
+- **The Java round-trip test imported a generated class that no longer exists.**
+  `VectorGroupingTest` imported `statelet.Statelet.*`, from before the proto declared
+  `package statelet.v1` and `java_outer_classname = "StateletProto"`. The compile error
+  above fired first, so this one had never been reached. Imports now point at
+  `statelet.v1.StateletProto`, and `mvn test` is green.
 
 ### Changed
 
@@ -66,3 +78,24 @@ is unchanged; what moved, and what that breaks, is listed below.
   flattened layout (`sdk/python/` → `python/`, and so on).
 - Added repository, homepage, and issue-tracker metadata to the Python, Node.js, Rust,
   and Java package manifests; added license and SCM blocks to `java/pom.xml`.
+
+- **All six SDKs now release from one workflow.** `release-python.yml` is replaced by
+  `release.yml`, which covers Python, Node.js, Rust, Java, Go and C++. Versions stay
+  per-SDK — each is released by its own prefixed tag (`python-v*`, `nodejs-v*`,
+  `rust-v*`, `java-v*`, `cpp-v*`, `go/v*`) against the version its own manifest declares.
+  `scripts/sdk-version.sh` parses all six manifest formats and is what enforces the
+  match; the old inline grep only ran on tag pushes, so a manual dispatch could publish
+  an unchecked version.
+
+  Two of the six have no registry, and the workflow says so rather than pretending
+  otherwise. Go is released by its tag alone: the job verifies the tagged tree and warms
+  `proxy.golang.org`, and a manual dispatch logs that it published nothing. C++ ships a
+  self-contained source tarball, plus a `.sha256`, attached to the GitHub Release.
+
+  **Action required before the next PyPI release:** a trusted publisher is keyed on the
+  workflow filename, so the pending publisher on PyPI has to be re-pointed from
+  `release-python.yml` to `release.yml`.
+
+- `java/pom.xml` gained a `release` profile carrying what Maven Central requires —
+  sources and javadoc jars, GPG signing, `<developers>`, and the Central Portal
+  publishing plugin. It is off by default so `mvn test` needs no signing key.

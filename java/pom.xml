@@ -21,6 +21,16 @@
         </license>
     </licenses>
 
+    <!-- Maven Central rejects a POM without at least one developer entry. -->
+    <developers>
+        <developer>
+            <id>stateletlab</id>
+            <name>Statelet Contributors</name>
+            <organization>Statelet</organization>
+            <organizationUrl>https://statelet.com</organizationUrl>
+        </developer>
+    </developers>
+
     <scm>
         <connection>scm:git:https://github.com/stateletlab/statelet-sdk.git</connection>
         <developerConnection>scm:git:git@github.com:stateletlab/statelet-sdk.git</developerConnection>
@@ -31,7 +41,17 @@
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <grpc.version>1.62.2</grpc.version>
-        <protobuf.version>3.25.3</protobuf.version>
+        <!-- 4.30 is a hard floor, not a routine bump. The engine's proto puts an
+             enum field `condition` next to `bytes condition_value` in
+             ConditionalBatchWriteRequest and AgentStateConditionalWriteRequest.
+             protoc-gen-java derives getConditionValue() from BOTH (the enum's
+             raw-number accessor and the bytes getter), and through protoc 29.x
+             it emits the clash verbatim, so javac rejects the generated sources
+             with "method getConditionValue() is already defined". protoc 30+
+             detects the collision and suffixes the loser with its field number
+             -> getConditionValue3(). Downgrading below 4.30 puts the build back
+             in the red. See "Known issues" in CHANGELOG.md. -->
+        <protobuf.version>4.31.1</protobuf.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
 
@@ -106,4 +126,100 @@
             </plugin>
         </plugins>
     </build>
+
+    <!-- Everything Maven Central demands beyond a plain jar, kept out of the
+         default build so `mvn test` stays fast and needs no signing key. The
+         release workflow runs `-P release verify` on a dry run and
+         `-P release deploy` for real. -->
+    <profiles>
+        <profile>
+            <id>release</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-source-plugin</artifactId>
+                        <version>3.3.1</version>
+                        <executions>
+                            <execution>
+                                <id>attach-sources</id>
+                                <goals><goal>jar-no-fork</goal></goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-javadoc-plugin</artifactId>
+                        <version>3.7.0</version>
+                        <configuration>
+                            <!-- The generated sources have to be in scope: the
+                                 hand-written client's signatures are built out
+                                 of them, and javadoc resolves a project's own
+                                 types from the source path, not from
+                                 target/classes. That means javadoc'ing the
+                                 200k-line StateletProto.java, hence the heap
+                                 bump; and proto comments are plain text that
+                                 javadoc reads as malformed HTML, hence
+                                 doclint=none. -->
+                            <doclint>none</doclint>
+                            <quiet>true</quiet>
+                            <maxmemory>2g</maxmemory>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>attach-javadocs</id>
+                                <goals><goal>jar</goal></goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                        <version>3.2.4</version>
+                        <configuration>
+                            <!-- No tty on a runner, and the passphrase arrives
+                                 through MAVEN_GPG_PASSPHRASE. -->
+                            <gpgArguments>
+                                <arg>--pinentry-mode</arg>
+                                <arg>loopback</arg>
+                            </gpgArguments>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>sign-artifacts</id>
+                                <phase>verify</phase>
+                                <goals><goal>sign</goal></goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <!-- The Central Portal plugin uploads in its own deploy
+                         goal, so the stock deploy plugin must be told to stay
+                         out of the way — otherwise `deploy` fails looking for a
+                         <distributionManagement> repository that is
+                         deliberately not declared. -->
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-deploy-plugin</artifactId>
+                        <version>3.1.2</version>
+                        <configuration>
+                            <skip>true</skip>
+                        </configuration>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.sonatype.central</groupId>
+                        <artifactId>central-publishing-maven-plugin</artifactId>
+                        <version>0.7.0</version>
+                        <extensions>true</extensions>
+                        <configuration>
+                            <!-- Matches server-id in the workflow's setup-java
+                                 step, which is what injects the portal token. -->
+                            <publishingServerId>central</publishingServerId>
+                            <autoPublish>true</autoPublish>
+                            <waitUntil>validated</waitUntil>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
