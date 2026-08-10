@@ -12,8 +12,8 @@ Usage::
     docs = vs.similarity_search("hello", k=3)
 """
 
-from langchain_statelet.vectorstore import StateletVectorStore
 from langchain_statelet.chat_history import StateletChatMessageHistory
+from langchain_statelet.vectorstore import StateletVectorStore
 
 __all__ = [
     "StateletVectorStore",

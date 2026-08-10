@@ -121,6 +121,11 @@ jobs:
         working-directory: rust
         run: cargo package --allow-dirty
 
+  # EXPECTED RED. The engine's proto declares an enum `condition` alongside
+  # `bytes condition_value`, and protoc-gen-java emits getConditionValue() for
+  # both, so the generated sources do not compile. This job stays enabled so the
+  # breakage is visible; see "Known issues" in CHANGELOG.md. Fix is a field
+  # rename in the engine repository, which owns the contract.
   java:
     name: java
     runs-on: ubuntu-latest

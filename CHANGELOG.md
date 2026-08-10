@@ -36,6 +36,27 @@ is unchanged; what moved, and what that breaks, is listed below.
   `../../proto/statelet.proto`, outside the crate directory, so a packaged crate would
   fail at build time. The proto is now vendored at `rust/proto/` and listed in `include`.
 
+### Known issues
+
+- **The Java SDK does not compile against the current proto.** `java/` had been pinned to
+  a stale vendored proto (3137 lines, against the engine's 4736); syncing it to the real
+  contract surfaced a name collision that only the Java codegen hits:
+
+  ```protobuf
+  WriteConditionKind condition       = 2;   // enum  → int         getConditionValue()
+  bytes              condition_value = 3;   // bytes → ByteString  getConditionValue()
+  ```
+
+  protoc-gen-java emits `get<Field>Value()` for an enum field, so `condition` and
+  `condition_value` produce two methods with the same signature and the generated file is
+  rejected by javac. It affects `ConditionalBatchWriteRequest` and
+  `AgentStateConditionalWriteRequest`. The other five languages are unaffected — this is
+  the Java analogue of the `has_edge` collision that previously broke the C++ codegen.
+
+  The fix is a field rename in the **engine** repository, which owns the contract, and is
+  wire-compatible as long as the field numbers stay put. Until then the `java` CI job
+  fails, deliberately: pinning the SDK back to a stale proto would only re-hide it.
+
 ### Changed
 
 - `proto/statelet.proto` at the repository root is the single source of truth;

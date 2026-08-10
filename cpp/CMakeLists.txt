@@ -11,7 +11,21 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # this export set were already defined" — so both are requested in CONFIG mode,
 # gRPC first.
 find_package(gRPC REQUIRED CONFIG)
-find_package(Protobuf REQUIRED CONFIG)
+
+# Protobuf is requested in CONFIG mode first so it resolves to the same targets
+# gRPC's own config already pulled in — that is what Homebrew and vcpkg ship,
+# and asking for module mode there leaves the export set half-defined ("Some
+# (but not all) targets in this export set were already defined").
+#
+# Debian/Ubuntu's libprotobuf-dev ships no protobuf-config.cmake at all, only
+# CMake's bundled FindProtobuf module, so a hard CONFIG requirement fails to
+# configure there. Fall back instead of hard-failing; both modes define the
+# protobuf::libprotobuf and protobuf::protoc targets used below.
+find_package(Protobuf QUIET CONFIG)
+if(NOT Protobuf_FOUND)
+    find_package(Protobuf REQUIRED MODULE)
+endif()
+
 find_package(Threads REQUIRED)
 
 # ── Generate protobuf / gRPC stubs ──────────────────────────────────────────

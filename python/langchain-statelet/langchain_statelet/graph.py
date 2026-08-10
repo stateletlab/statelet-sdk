@@ -19,9 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from langchain_community.graphs.graph_document import GraphDocument
 from langchain_community.graphs.graph_store import GraphStore
-
 from statelet.client import StateletClient
-
 
 _DEFAULT_GRAPH = "langchain_kg"
 _KV_CF = 0

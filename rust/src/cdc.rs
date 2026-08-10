@@ -77,10 +77,7 @@ fn parse_state(bytes: &[u8]) -> HashMap<String, u64> {
         Some(inner) => inner.trim(),
         None => return HashMap::new(),
     };
-    match parse_pairs(inner) {
-        Some(m) => m,
-        None => HashMap::new(),
-    }
+    parse_pairs(inner).unwrap_or_default()
 }
 
 /// Parse `"key":num,"key":num,...` (no surrounding braces). Returns `None` on
