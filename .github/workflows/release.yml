@@ -36,6 +36,10 @@ on:
         description: 'Build, test and verify, but do not publish anything'
         type: boolean
         default: true
+      go_version:
+        description: 'Version to tag Go at, e.g. 0.1.0. Required only when releasing go, which has no manifest to read one from.'
+        type: string
+        default: ''
   push:
     tags:
       - 'python-v*'
@@ -377,10 +381,17 @@ jobs:
           done
           echo "::warning::proxy.golang.org has not picked up $mod@v$VERSION yet. The tag is pushed, so it will resolve on its own; nothing is broken."
 
-      - name: Explain that a dispatch publishes nothing
-        if: github.event_name != 'push'
+      - name: Require a version when releasing Go from a dispatch
+        if: github.event_name != 'push' && needs.plan.outputs.dry_run != 'true'
+        env:
+          GO_VERSION: ${{ inputs.go_version }}
         run: |
-          echo "::warning::Nothing was published for Go. A Go module is released by its tag alone — push go/vX.Y.Z. This run only verified the module builds."
+          set -euo pipefail
+          if [ -z "$GO_VERSION" ]; then
+            echo "::error::Releasing Go needs the go_version input. A Go module declares no version anywhere in its tree — the go/vX.Y.Z tag IS the version — so unlike the other five SDKs there is no manifest to read one from." >&2
+            exit 1
+          fi
+          echo "will be tagged go/v$GO_VERSION by the tag job"
 
   # ── cpp -> GitHub Release tarball ───────────────────────────────────────────
   # No package registry to target. Consumers vendor the tree or point
@@ -456,3 +467,106 @@ jobs:
               --notes "Self-contained CMake source tree for the Statelet C++ client. Verify with the accompanying .sha256."
           fi
           gh release upload "$TAG" "$TARBALL" "$TARBALL.sha256" --clobber
+
+  # ── tag what was just released ──────────────────────────────────────────────
+  # A tag push is still the primary trigger and this job does nothing for it.
+  # It exists for the dispatch path, which had no tag and therefore left two
+  # holes: Go and C++ are released BY their tag, so neither could be shipped
+  # that way at all, and the other four could be published with no ref anyone
+  # could later point at and say "that is what 0.1.1 was built from".
+  #
+  # Tags are created after the publish jobs, not before, so a tag never claims a
+  # release that failed halfway. Go is the exception in spirit — its tag IS the
+  # release — but the ordering still holds: the go job verifies the tree, then
+  # this job tags it and warms the proxy.
+  #
+  # Pushing with GITHUB_TOKEN does NOT re-trigger this workflow, even though
+  # `on.push.tags` matches what is created here: GitHub deliberately suppresses
+  # workflow runs from events raised by the default token, which is what keeps
+  # this from looping.
+  tag:
+    name: tag the release
+    needs: [plan, python, nodejs, rust, go, java, cpp]
+    if: >-
+      always()
+      && github.event_name == 'workflow_dispatch'
+      && needs.plan.result == 'success'
+      && needs.plan.outputs.dry_run != 'true'
+      && !contains(needs.*.result, 'failure')
+      && !contains(needs.*.result, 'cancelled')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create and push the tags
+        env:
+          SEL_PYTHON: ${{ needs.plan.outputs.python }}
+          SEL_NODEJS: ${{ needs.plan.outputs.nodejs }}
+          SEL_RUST: ${{ needs.plan.outputs.rust }}
+          SEL_GO: ${{ needs.plan.outputs.go }}
+          SEL_JAVA: ${{ needs.plan.outputs.java }}
+          SEL_CPP: ${{ needs.plan.outputs.cpp }}
+          GO_VERSION: ${{ inputs.go_version }}
+        run: |
+          set -euo pipefail
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          tagged=()
+          for sdk in python nodejs rust go java cpp; do
+            eval "selected=\${SEL_$(echo "$sdk" | tr '[:lower:]' '[:upper:]')}"
+            [ "$selected" = 'true' ] || continue
+
+            if [ "$sdk" = 'go' ]; then
+              # No manifest to read; the go job already refused to get this far
+              # with an empty go_version.
+              version="$GO_VERSION"
+              tag="go/v$version"
+            else
+              version="$(./scripts/sdk-version.sh "$sdk")"
+              tag="$sdk-v$version"
+            fi
+
+            if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+              echo "::warning::$tag already exists on the remote; leaving it alone. The publish jobs still ran, so this is a re-release of a version that was already tagged."
+              continue
+            fi
+
+            git tag -a "$tag" -m "$sdk SDK $version" "$GITHUB_SHA"
+            git push origin "$tag"
+            echo "pushed $tag"
+            tagged+=("$tag")
+          done
+
+          {
+            echo "### Tags"
+            echo
+            if [ ${#tagged[@]} -eq 0 ]; then
+              echo "_none created — every selected SDK was already tagged at its current version._"
+            else
+              printf -- '- \`%s\`\n' "${tagged[@]}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Only reachable on the dispatch path; the push path warms the proxy in
+      # the go job, where the tag already exists on arrival.
+      - name: Warm the module proxy
+        if: needs.plan.outputs.go == 'true'
+        env:
+          VERSION: ${{ inputs.go_version }}
+        run: |
+          set -euo pipefail
+          mod='github.com/stateletlab/statelet-sdk/go'
+          cd "$(mktemp -d)"
+          go mod init warm >/dev/null
+          for attempt in 1 2 3 4 5; do
+            if GOPROXY=https://proxy.golang.org GOFLAGS=-mod=mod go get "$mod@v$VERSION"; then
+              echo "proxy is serving $mod@v$VERSION"
+              exit 0
+            fi
+            echo "attempt $attempt: not on the proxy yet"
+            sleep 30
+          done
+          echo "::warning::proxy.golang.org has not picked up $mod@v$VERSION yet. The tag is pushed, so it will resolve on its own; nothing is broken."
