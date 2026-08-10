@@ -288,5 +288,5 @@ Same API as `Client`, all methods are `async`.
 
 ## Requirements
 
-- Statelet server running (see [statelet.com](https://statelet.com))
+- Statelet server running (see [statelet.ai](https://statelet.ai))
 - Python >= 3.9

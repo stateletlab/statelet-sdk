@@ -26,7 +26,19 @@ is unchanged; what moved, and what that breaks, is listed below.
 
 ### Fixed
 
-- **The npm package shipped no proto.** `statelet-sdk` listed only `dist` and
+- **Package metadata pointed at a domain that is not ours.** Five manifests and one README
+  linked to `statelet.com`, which resolves to an Afternic parking page — its nameservers
+  are the marketplace's and the page does nothing but redirect to `/lander`. The project
+  site is `statelet.ai`. A registry page's Homepage link is the first thing a prospective
+  user clicks, so every reference now points there.
+
+  Timing matters, because crates.io and PyPI both freeze a version's metadata at publish.
+  The Rust crate has not shipped yet, so it takes the corrected link from its first
+  release. PyPI is half past that point: `statelet` 0.1.1 went out before the client
+  distribution was renamed to `statelet-sdk`, and that artifact carries the dead link
+  permanently — but `statelet-sdk` itself starts clean.
+
+- **The npm package shipped no proto.** `statelet-client` listed only `dist` and
   `README.md` in `files`, while `client.ts` resolved the proto three directories above
   the package root — a path that exists in a repository checkout and in no installed
   tarball. The proto is now vendored at `nodejs/proto/statelet.proto`, included in

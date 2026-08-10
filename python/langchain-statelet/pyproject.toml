@@ -36,7 +36,7 @@ dev = [
 Homepage = "https://github.com/stateletlab/statelet-sdk"
 Repository = "https://github.com/stateletlab/statelet-sdk"
 Issues = "https://github.com/stateletlab/statelet-sdk/issues"
-Documentation = "https://statelet.com"
+Documentation = "https://statelet.ai"
 
 [tool.ruff]
 target-version = "py39"
