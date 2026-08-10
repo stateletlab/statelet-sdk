@@ -1,0 +1,443 @@
+name: Release SDKs
+
+# One workflow for all six client SDKs. They ship to six unrelated places, so
+# what is shared here is the trigger, the version check, and the proto-sync gate
+# — not the publishing mechanics, which have nothing in common:
+#
+#   python   statelet                                 -> PyPI          (OIDC, no token)
+#   nodejs   statelet-client                          -> npm           (NPM_TOKEN)
+#   rust     statelet-client                          -> crates.io     (CARGO_REGISTRY_TOKEN)
+#   java     ai.statelet:statelet-client              -> Maven Central (portal token + GPG)
+#   go       github.com/stateletlab/statelet-sdk/go   -> the tag itself; there is no registry
+#   cpp      source tarball                           -> GitHub Release; there is no registry
+#
+# Versions are per-SDK, not lockstep. Release one by pushing its tag:
+#
+#   git tag python-v0.1.1 && git push origin python-v0.1.1
+#   git tag go/v0.1.0     && git push origin go/v0.1.0      # the go/ prefix is mandatory
+#
+# The manual workflow_dispatch path exists for re-runs and rehearsals. It
+# defaults to dry_run, because without a tag there is nothing to check the
+# manifest version against and an unguarded dispatch would publish whatever
+# version happens to be committed.
+#
+# Secrets and one-time setup are listed under "Publishing credentials" in
+# CONTRIBUTING.md. langchain-statelet is NOT here — it is an integration
+# package, not an SDK, and keeps its own release-langchain.yml.
+
+on:
+  workflow_dispatch:
+    inputs:
+      sdks:
+        description: 'Which SDKs: "all", or a comma-separated subset of python,nodejs,rust,go,java,cpp'
+        type: string
+        default: all
+      dry_run:
+        description: 'Build, test and verify, but do not publish anything'
+        type: boolean
+        default: true
+  push:
+    tags:
+      - 'python-v*'
+      - 'nodejs-v*'
+      - 'rust-v*'
+      - 'java-v*'
+      - 'cpp-v*'
+      - 'go/v*'
+
+permissions:
+  contents: read
+
+# Two releases of the same SDK must not interleave, but python and rust
+# releasing at once is fine and common — hence a per-ref group. Never cancel:
+# half a publish is worse than a queued one.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: plan
+    runs-on: ubuntu-latest
+    outputs:
+      python: ${{ steps.select.outputs.python }}
+      nodejs: ${{ steps.select.outputs.nodejs }}
+      rust: ${{ steps.select.outputs.rust }}
+      go: ${{ steps.select.outputs.go }}
+      java: ${{ steps.select.outputs.java }}
+      cpp: ${{ steps.select.outputs.cpp }}
+      version: ${{ steps.select.outputs.version }}
+      dry_run: ${{ steps.select.outputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Every published artifact carries its own vendored copy of the proto, so
+      # a stale copy is not a lint failure — it ships wrong bytes to users of
+      # that one language. Gate the whole release on it.
+      - name: proto copies in sync
+        run: ./scripts/sync-proto.sh --check
+
+      - name: Decide what is being released
+        id: select
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref_name }}
+          INPUT_SDKS: ${{ inputs.sdks }}
+          INPUT_DRY: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          version=""
+
+          if [ "$EVENT" = "push" ]; then
+            dry_run=false
+            case "$REF" in
+              python-v*) selected=python; version="${REF#python-v}" ;;
+              nodejs-v*) selected=nodejs; version="${REF#nodejs-v}" ;;
+              rust-v*)   selected=rust;   version="${REF#rust-v}"   ;;
+              java-v*)   selected=java;   version="${REF#java-v}"   ;;
+              cpp-v*)    selected=cpp;    version="${REF#cpp-v}"    ;;
+              go/v*)     selected=go;     version="${REF#go/v}"     ;;
+              *) echo "::error::$REF is not a release tag this workflow knows" >&2; exit 1 ;;
+            esac
+          else
+            dry_run="$INPUT_DRY"
+            selected="${INPUT_SDKS// /}"
+            [ "$selected" = "all" ] && selected="python,nodejs,rust,go,java,cpp"
+          fi
+
+          for sdk in python nodejs rust go java cpp; do
+            case ",$selected," in
+              *",$sdk,"*) echo "$sdk=true"  >> "$GITHUB_OUTPUT" ;;
+              *)          echo "$sdk=false" >> "$GITHUB_OUTPUT" ;;
+            esac
+          done
+          echo "version=$version"   >> "$GITHUB_OUTPUT"
+          echo "dry_run=$dry_run"   >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Release plan"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| SDKs | \`$selected\` |"
+            echo "| Version | ${version:-_taken from each manifest_} |"
+            echo "| Publish | $([ "$dry_run" = "true" ] && echo 'no — dry run' || echo '**yes**') |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$EVENT" != "push" ] && [ "$dry_run" != "true" ]; then
+            echo "::warning::Publishing from a manual dispatch. There is no tag to check the manifest versions against."
+          fi
+
+  # ── python -> PyPI ──────────────────────────────────────────────────────────
+  # Trusted publishing: no API token lives in this repository. The pending
+  # publisher at https://pypi.org/manage/account/publishing/ must name
+  #   project: statelet · owner: stateletlab · repo: statelet-sdk
+  #   workflow: release.yml · environment: pypi
+  # NOTE: `release.yml`, not the `release-python.yml` this replaced. A trusted
+  # publisher is keyed on the workflow FILENAME, so the PyPI entry has to be
+  # edited or the first publish is rejected as an untrusted claim.
+  python:
+    name: python -> PyPI
+    needs: plan
+    if: needs.plan.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: ./scripts/sdk-version.sh python '${{ needs.plan.outputs.version }}'
+
+      - name: Build
+        working-directory: python
+        run: |
+          pip install build twine
+          python -m build
+          twine check dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: statelet-dist
+          path: python/dist/*
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        if: needs.plan.outputs.dry_run != 'true'
+        with:
+          packages-dir: python/dist/
+
+  # ── nodejs -> npm ───────────────────────────────────────────────────────────
+  nodejs:
+    name: nodejs -> npm
+    needs: plan
+    if: needs.plan.outputs.nodejs == 'true'
+    runs-on: ubuntu-latest
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write   # provenance attestation; not authentication
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - run: ./scripts/sdk-version.sh nodejs '${{ needs.plan.outputs.version }}'
+
+      - name: Install
+        working-directory: nodejs
+        run: npm ci
+
+      - name: Test
+        working-directory: nodejs
+        run: npm test
+
+      # client.ts resolves the proto relative to the package root, so a tarball
+      # without it installs clean and then throws on first connect. CI checks
+      # this too; it is repeated here because this is the copy that ships.
+      - name: Verify the packed tarball carries the proto
+        working-directory: nodejs
+        run: |
+          npm pack --dry-run --json > /tmp/pack.json
+          if ! grep -q '"path": *"proto/statelet.proto"' /tmp/pack.json; then
+            echo "::error::proto/statelet.proto is missing from the npm tarball" >&2
+            cat /tmp/pack.json >&2
+            exit 1
+          fi
+
+      - name: Publish
+        if: needs.plan.outputs.dry_run != 'true'
+        working-directory: nodejs
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # ── rust -> crates.io ───────────────────────────────────────────────────────
+  rust:
+    name: rust -> crates.io
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    environment: crates-io
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - run: ./scripts/sdk-version.sh rust '${{ needs.plan.outputs.version }}'
+
+      - name: Clippy
+        working-directory: rust
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Test
+        working-directory: rust
+        run: cargo test
+
+      # build.rs compiles the vendored proto, so `cargo package` compiling the
+      # packaged crate from scratch is the only real check that `include` is
+      # complete. Do it before publish, which cannot be undone.
+      - name: Verify the crate packages standalone
+        working-directory: rust
+        run: cargo package
+
+      - name: Publish
+        if: needs.plan.outputs.dry_run != 'true'
+        working-directory: rust
+        run: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  # ── java -> Maven Central ───────────────────────────────────────────────────
+  # Needs, one time: the ai.statelet namespace verified in the Central Portal, a
+  # published GPG key, and four secrets — MAVEN_CENTRAL_USERNAME /
+  # MAVEN_CENTRAL_PASSWORD (portal tokens, not the account password),
+  # MAVEN_GPG_PRIVATE_KEY (ASCII-armoured) and MAVEN_GPG_PASSPHRASE.
+  java:
+    name: java -> Maven Central
+    needs: plan
+    if: needs.plan.outputs.java == 'true'
+    runs-on: ubuntu-latest
+    environment: maven-central
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: temurin
+          cache: maven
+          server-id: central
+          server-username: MAVEN_CENTRAL_USERNAME
+          server-password: MAVEN_CENTRAL_PASSWORD
+
+      - run: ./scripts/sdk-version.sh java '${{ needs.plan.outputs.version }}'
+
+      - name: Test
+        run: mvn --batch-mode test
+        working-directory: java
+
+      # Unsigned on a dry run: the signing key is the one input a rehearsal has
+      # no business needing, and gpg.skip leaves everything else identical.
+      - name: Build the release artifacts (unsigned)
+        if: needs.plan.outputs.dry_run == 'true'
+        working-directory: java
+        run: mvn --batch-mode -P release verify -Dgpg.skip=true
+
+      - name: Import the signing key
+        if: needs.plan.outputs.dry_run != 'true'
+        env:
+          MAVEN_GPG_PRIVATE_KEY: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }}
+        run: printf '%s' "$MAVEN_GPG_PRIVATE_KEY" | gpg --batch --import
+
+      - name: Publish
+        if: needs.plan.outputs.dry_run != 'true'
+        working-directory: java
+        run: mvn --batch-mode -P release deploy
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
+
+  # ── go -> the module proxy ──────────────────────────────────────────────────
+  # Go has no registry and no publish step: the `go/vX.Y.Z` tag IS the release,
+  # and it is already pushed by the time this job runs. All this job can do is
+  # verify the tagged tree is sound and ask the proxy to fetch it, so the first
+  # real user is not the one who discovers a broken tag.
+  go:
+    name: go -> module proxy
+    needs: plan
+    if: needs.plan.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: go/go.sum
+
+      - name: Check the module path
+        working-directory: go
+        run: |
+          set -euo pipefail
+          want='github.com/stateletlab/statelet-sdk/go'
+          have="$(go list -m)"
+          if [ "$have" != "$want" ]; then
+            echo "::error::go.mod declares $have, but the go/vX.Y.Z tag on this repository publishes $want" >&2
+            exit 1
+          fi
+          echo "module $have"
+
+      - name: Vet
+        working-directory: go
+        run: go vet ./...
+
+      - name: Test
+        working-directory: go
+        run: go test ./...
+
+      - name: Warm the module proxy
+        if: needs.plan.outputs.dry_run != 'true' && github.event_name == 'push'
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          mod='github.com/stateletlab/statelet-sdk/go'
+          cd "$(mktemp -d)"
+          go mod init warm >/dev/null
+          # The proxy discovers a tag on its own schedule, so the first few
+          # attempts legitimately 404. This is a convenience, not a gate.
+          for attempt in 1 2 3 4 5; do
+            if GOPROXY=https://proxy.golang.org GOFLAGS=-mod=mod go get "$mod@v$VERSION"; then
+              echo "proxy is serving $mod@v$VERSION"
+              exit 0
+            fi
+            echo "attempt $attempt: not on the proxy yet"
+            sleep 30
+          done
+          echo "::warning::proxy.golang.org has not picked up $mod@v$VERSION yet. The tag is pushed, so it will resolve on its own; nothing is broken."
+
+      - name: Explain that a dispatch publishes nothing
+        if: github.event_name != 'push'
+        run: |
+          echo "::warning::Nothing was published for Go. A Go module is released by its tag alone — push go/vX.Y.Z. This run only verified the module builds."
+
+  # ── cpp -> GitHub Release tarball ───────────────────────────────────────────
+  # No package registry to target. Consumers vendor the tree or point
+  # FetchContent at a tarball, so the release artifact is a self-contained
+  # source archive: the CMake project plus its vendored proto and the licences.
+  cpp:
+    name: cpp -> release tarball
+    needs: plan
+    if: needs.plan.outputs.cpp == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # attaching an asset to the GitHub Release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install gRPC and Protobuf
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ libgrpc++-dev protobuf-compiler-grpc libprotobuf-dev
+
+      - name: Resolve the version
+        id: v
+        run: echo "version=$(./scripts/sdk-version.sh cpp '${{ needs.plan.outputs.version }}')" >> "$GITHUB_OUTPUT"
+
+      - name: Configure
+        working-directory: cpp
+        run: cmake -B build
+
+      - name: Build
+        working-directory: cpp
+        run: cmake --build build
+
+      - name: Test
+        working-directory: cpp
+        run: ctest --test-dir build --output-on-failure
+
+      # Assembled by hand rather than `git archive`, because the archive has to
+      # be rooted at the CMake project while still carrying the repository-level
+      # LICENSE and NOTICE, and has to exclude the build tree.
+      - name: Assemble the source tarball
+        id: pack
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          set -euo pipefail
+          stage="statelet-cpp-$VERSION"
+          mkdir "$stage"
+          cp -R cpp/CMakeLists.txt cpp/include cpp/src cpp/proto cpp/examples cpp/tests cpp/README.md "$stage/"
+          cp LICENSE NOTICE "$stage/"
+          tar czf "$stage.tar.gz" "$stage"
+          sha256sum "$stage.tar.gz" > "$stage.tar.gz.sha256"
+          cat "$stage.tar.gz.sha256"
+          echo "tarball=$stage.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: statelet-cpp-source
+          path: |
+            ${{ steps.pack.outputs.tarball }}
+            ${{ steps.pack.outputs.tarball }}.sha256
+
+      - name: Attach to the GitHub Release
+        if: needs.plan.outputs.dry_run != 'true' && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --title "C++ SDK ${{ steps.v.outputs.version }}" \
+              --notes "Self-contained CMake source tree for the Statelet C++ client. Verify with the accompanying .sha256."
+          fi
+          gh release upload "$TAG" "$TARBALL" "$TARBALL.sha256" --clobber
