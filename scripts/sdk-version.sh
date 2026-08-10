@@ -81,7 +81,7 @@ case "$SDK" in
         # <modelVersion>, and grabbing the last would pick up a dependency's.
         POM="$REPO_ROOT/java/pom.xml"
         [ -f "$POM" ] || die "java: $POM does not exist"
-        VERSION="$(sed -n '/<artifactId>statelet-client<\/artifactId>/,$p' "$POM" \
+        VERSION="$(sed -n '/<artifactId>statelet-sdk<\/artifactId>/,$p' "$POM" \
             | sed -nE 's|^[[:space:]]*<version>([^<]+)</version>.*|\1|p' | head -1)"
         [ -n "$VERSION" ] || die "java: no project version matched in $POM"
         ;;

@@ -5,9 +5,9 @@ name: Release SDKs
 # — not the publishing mechanics, which have nothing in common:
 #
 #   python   statelet-sdk                             -> PyPI          (OIDC, no token)
-#   nodejs   statelet-client                          -> npm           (NPM_TOKEN)
-#   rust     statelet-client                          -> crates.io     (CARGO_REGISTRY_TOKEN)
-#   java     ai.statelet:statelet-client              -> Maven Central (portal token + GPG)
+#   nodejs   statelet-sdk                             -> npm           (NPM_TOKEN)
+#   rust     statelet-sdk                             -> crates.io     (CARGO_REGISTRY_TOKEN)
+#   java     ai.statelet:statelet-sdk                 -> Maven Central (portal token + GPG)
 #   go       github.com/stateletlab/statelet-sdk/go   -> the tag itself; there is no registry
 #   cpp      source tarball                           -> GitHub Release; there is no registry
 #

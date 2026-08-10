@@ -53,7 +53,7 @@ workflow refuses a mismatch.
 
 | SDK | Tag | Registry | Version comes from |
 |---|---|---|---|
-| `statelet` | `python-v0.1.1` | PyPI | `python/pyproject.toml` |
+| `statelet-sdk` (PyPI) | `python-v0.1.1` | PyPI | `python/pyproject.toml` |
 | `statelet-sdk` (npm) | `nodejs-v0.1.0` | npm | `nodejs/package.json` |
 | `statelet-sdk` (crate) | `rust-v0.1.0` | crates.io | `rust/Cargo.toml` |
 | `ai.statelet:statelet-sdk` | `java-v0.1.0` | Maven Central | `java/pom.xml` |

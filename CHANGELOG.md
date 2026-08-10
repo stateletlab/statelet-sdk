@@ -8,6 +8,26 @@ is unchanged; what moved, and what that breaks, is listed below.
 
 ### Breaking
 
+- **Every SDK publishes as `statelet-sdk`.** The Python rename carried a reason specific
+  to PyPI — `statelet` there is the server distribution, and two distributions cannot
+  share a name — but the result was a repository whose packages answered to two names at
+  once, with the docs already describing an end state the manifests had not reached. The
+  remaining three now match:
+
+  | | was | is |
+  |---|---|---|
+  | npm | `statelet-client` | `statelet-sdk` |
+  | Maven Central | `ai.statelet:statelet-client` | `ai.statelet:statelet-sdk` |
+  | CMake project + library target | `statelet-client` / `statelet_client` | `statelet-sdk` / `statelet_sdk` |
+
+  Two consequences worth stating plainly. The Rust crate was renamed in the same pass
+  that renamed the Python distribution, so its import path is `statelet_sdk::`, not
+  `statelet_client::` — every example in `rust/README.md` and the crate-level doc comment
+  said the old path and would not have compiled. And C++ consumers link `statelet_sdk`.
+
+  Nothing here is published yet except `statelet` 0.1.1 on PyPI, so no installed artifact
+  changes name under anyone.
+
 - **Go import path.** `github.com/stateletlab/statelet/sdk/go/...` →
   `github.com/stateletlab/statelet-sdk/go/...`. The repository name is part of a Go
   module path, so a move cannot preserve it. The package name (`statelet`), every type,
@@ -38,7 +58,7 @@ is unchanged; what moved, and what that breaks, is listed below.
   distribution was renamed to `statelet-sdk`, and that artifact carries the dead link
   permanently — but `statelet-sdk` itself starts clean.
 
-- **The npm package shipped no proto.** `statelet-client` listed only `dist` and
+- **The npm package shipped no proto.** `statelet-sdk` listed only `dist` and
   `README.md` in `files`, while `client.ts` resolved the proto three directories above
   the package root — a path that exists in a repository checkout and in no installed
   tarball. The proto is now vendored at `nodejs/proto/statelet.proto`, included in

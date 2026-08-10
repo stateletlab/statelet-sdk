@@ -13,7 +13,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 ## Usage
 
 ```rust
-use statelet_client::{StateletClient, VectorIndexConfig, WriteOp};
+use statelet_sdk::{StateletClient, VectorIndexConfig, WriteOp};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -60,7 +60,7 @@ the retrieval procedures `db.vectorSearch` / `db.hybridSearch` / `db.graphRag`.
 `CREATE` / `MERGE` are rejected.
 
 ```rust
-use statelet_client::{GraphQueryOptions, GraphValue, StateletClient};
+use statelet_sdk::{GraphQueryOptions, GraphValue, StateletClient};
 
 let res = client
     .graph_query(
@@ -98,7 +98,7 @@ window — the analogue of Weaviate `.with_additional({rerank})` and Pinecone
 `inference.rerank`. See [`docs/reranking.md`](../../docs/reranking.md).
 
 ```rust
-use statelet_client::proto::RerankSpec;
+use statelet_sdk::proto::RerankSpec;
 
 // Cross-encoder: hydrate passage text via the {id}/{index} template and rescore.
 let reranked = client
@@ -157,7 +157,7 @@ is committed *after* your handler returns `Ok(true)`, giving at-least-once
 delivery — so your handler must be idempotent.
 
 ```rust
-use statelet_client::{FileCheckpointStore, SubscribeCommittedOptions};
+use statelet_sdk::{FileCheckpointStore, SubscribeCommittedOptions};
 
 let ckpt = FileCheckpointStore::open("/var/lib/myapp/cdc.json")?;
 let opts = SubscribeCommittedOptions {

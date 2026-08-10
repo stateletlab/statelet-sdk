@@ -1,5 +1,5 @@
 {
-  "name": "statelet-client",
+  "name": "statelet-sdk",
   "version": "0.1.0",
   "description": "TypeScript gRPC client for Statelet distributed key-value store",
   "main": "dist/index.js",
