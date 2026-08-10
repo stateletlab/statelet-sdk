@@ -28,7 +28,7 @@ import {
   WriteEntryBuilder,
   VectorIndexConfigBuilder,
   VectorDistanceMetric,
-} from "statelet-client";
+} from "statelet-sdk";
 
 async function main() {
   const client = new StateletClient("127.0.0.1", 7379);
@@ -82,7 +82,7 @@ the retrieval procedures `db.vectorSearch` / `db.hybridSearch` / `db.graphRag`.
 `CREATE` / `MERGE` are rejected.
 
 ```ts
-import { StateletClient, graphRowsToObjects } from "statelet-client";
+import { StateletClient, graphRowsToObjects } from "statelet-sdk";
 
 const res = await client.graphQuery(
   "MATCH (m {id: 42})-[:supersedes]->(old) RETURN m, old LIMIT 10",
@@ -114,7 +114,7 @@ window — the analogue of Weaviate `.with_additional({rerank})` and Pinecone
 `inference.rerank`. See [`docs/reranking.md`](../../docs/reranking.md).
 
 ```ts
-import { RerankSpec } from "statelet-client";
+import { RerankSpec } from "statelet-sdk";
 
 // Cross-encoder: hydrate passage text via the {id}/{index} template + rescore.
 let results = await client.vectorSearch(
@@ -149,7 +149,7 @@ await client.rerankValidate("embeddings", {
 For local integration, the SDK can also start and stop a standalone `raft_engine` process for you.
 
 ```ts
-import { StateletServer } from "statelet-client";
+import { StateletServer } from "statelet-sdk";
 
 async function main() {
   const server = await StateletServer.startStandalone({

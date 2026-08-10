@@ -4,7 +4,7 @@ name: Release SDKs
 # what is shared here is the trigger, the version check, and the proto-sync gate
 # — not the publishing mechanics, which have nothing in common:
 #
-#   python   statelet                                 -> PyPI          (OIDC, no token)
+#   python   statelet-sdk                             -> PyPI          (OIDC, no token)
 #   nodejs   statelet-client                          -> npm           (NPM_TOKEN)
 #   rust     statelet-client                          -> crates.io     (CARGO_REGISTRY_TOKEN)
 #   java     ai.statelet:statelet-client              -> Maven Central (portal token + GPG)
@@ -131,7 +131,7 @@ jobs:
   # ── python -> PyPI ──────────────────────────────────────────────────────────
   # Trusted publishing: no API token lives in this repository. The pending
   # publisher at https://pypi.org/manage/account/publishing/ must name
-  #   project: statelet · owner: stateletlab · repo: statelet-sdk
+  #   project: statelet-sdk · owner: stateletlab · repo: statelet-sdk
   #   workflow: release.yml · environment: pypi
   # NOTE: `release.yml`, not the `release-python.yml` this replaced. A trusted
   # publisher is keyed on the workflow FILENAME, so the PyPI entry has to be

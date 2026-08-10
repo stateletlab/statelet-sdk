@@ -26,7 +26,7 @@ is unchanged; what moved, and what that breaks, is listed below.
 
 ### Fixed
 
-- **The npm package shipped no proto.** `statelet-client` listed only `dist` and
+- **The npm package shipped no proto.** `statelet-sdk` listed only `dist` and
   `README.md` in `files`, while `client.ts` resolved the proto three directories above
   the package root — a path that exists in a repository checkout and in no installed
   tarball. The proto is now vendored at `nodejs/proto/statelet.proto`, included in

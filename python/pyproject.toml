@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "statelet"
+name = "statelet-sdk"
 version = "0.1.1"
 description = "Python SDK for Statelet — agent memory with KV, vector search, and temporal causal graphs in one database"
 readme = "README.md"

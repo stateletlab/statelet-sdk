@@ -1,5 +1,5 @@
 [package]
-name = "statelet-client"
+name = "statelet-sdk"
 version = "0.1.0"
 edition = "2021"
 description = "Rust gRPC client for Statelet distributed key-value store"
