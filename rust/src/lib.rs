@@ -10,7 +10,7 @@
 //! # Example
 //!
 //! ```no_run
-//! use statelet_client::StateletClient;
+//! use statelet_sdk::StateletClient;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {

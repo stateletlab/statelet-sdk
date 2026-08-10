@@ -8,12 +8,12 @@ All six SDKs wrap the same gRPC contract: [`proto/statelet.proto`](proto/statele
 
 | Language | Directory | Package | Transport |
 |---|---|---|---|
-| Python | [`python/`](python/) | `statelet` (PyPI) | grpcio |
+| Python | [`python/`](python/) | `statelet-sdk` (PyPI) | grpcio |
 | Node.js / TypeScript | [`nodejs/`](nodejs/) | `statelet-sdk` (npm) | `@grpc/grpc-js` |
 | Go | [`go/`](go/) | `github.com/stateletlab/statelet-sdk/go` | grpc-go |
 | Rust | [`rust/`](rust/) | `statelet-sdk` | tonic |
 | Java | [`java/`](java/) | `ai.statelet:statelet-sdk` | grpc-java + Netty |
-| C++ | [`cpp/`](cpp/) | `statelet_client` (CMake) | gRPC C++ |
+| C++ | [`cpp/`](cpp/) | `statelet_sdk` (CMake) | gRPC C++ |
 
 Plus [`python/langchain-statelet/`](python/langchain-statelet/) — a LangChain integration
 (`VectorStore`, `ChatHistory`, `GraphStore`) published separately as `langchain-statelet`.

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(statelet-client VERSION 0.1.0 LANGUAGES CXX)
+project(statelet-sdk VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -55,7 +55,7 @@ add_custom_command(
 )
 
 # ── Library ──────────────────────────────────────────────────────────────────
-add_library(statelet_client
+add_library(statelet_sdk
     src/client.cpp
     src/agent_client.cpp
     src/agent_types.cpp
@@ -63,12 +63,12 @@ add_library(statelet_client
     ${GRPC_SRCS}
 )
 
-target_include_directories(statelet_client PUBLIC
+target_include_directories(statelet_sdk PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<BUILD_INTERFACE:${PROTO_OUT}>
 )
 
-target_link_libraries(statelet_client PUBLIC
+target_link_libraries(statelet_sdk PUBLIC
     gRPC::grpc++
     protobuf::libprotobuf
     Threads::Threads
@@ -76,7 +76,7 @@ target_link_libraries(statelet_client PUBLIC
 
 # ── Example ──────────────────────────────────────────────────────────────────
 add_executable(statelet_example examples/example.cpp)
-target_link_libraries(statelet_example PRIVATE statelet_client)
+target_link_libraries(statelet_example PRIVATE statelet_sdk)
 
 # ── Tests ────────────────────────────────────────────────────────────────────
 # The value types and the step-JSON decoder carry no gRPC dependency, so this

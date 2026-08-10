@@ -856,7 +856,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "statelet-client"
+name = "statelet-sdk"
 version = "0.1.0"
 dependencies = [
  "prost",
