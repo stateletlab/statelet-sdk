@@ -128,10 +128,19 @@ was tagged on none of them.
 A registry that cannot be reached is a failure, not a skip — otherwise an outage would
 look like a successful release that shipped nothing.
 
-Go needs `version` where the others treat it as optional. Every other SDK can fall back to
-its manifest; a Go module records its version nowhere — the `go/vX.Y.Z` tag *is* the
-version — so with the field empty there is nothing to name a tag after, and the job says
-so instead of guessing.
+**Go borrows its version from its neighbours.** Every other SDK falls back to its own
+manifest when `version` is empty; a Go module records its version nowhere — the
+`go/vX.Y.Z` tag *is* the version — so there is nothing to fall back to. With the field
+empty, `scripts/go-release-version.sh` takes the version the other SDKs in the same
+release unanimously declare, since they are being shipped from the same commit in the same
+run. Versions are per-SDK, so a disagreement is legitimate and means there is no single
+version to lend: the run then stops in `plan`, before anything is published, and asks for
+the field.
+
+That fallback exists because its absence cost a release its tags. `0.1.3` was dispatched
+the recommended way — manifests already bumped, `version` left empty — and Go was the one
+job that could not survive it. Five SDKs published; the tag job, which needs all six,
+never ran.
 
 ### Publishing credentials
 

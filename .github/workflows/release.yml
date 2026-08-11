@@ -16,7 +16,8 @@ name: Release SDKs
 # 1. Actions -> Run workflow, with `sdks` and `version`. The version is written
 #    into every selected manifest, committed, and only then built — so one
 #    field sets all six and no manifest is edited by hand. Leaving `version`
-#    empty releases whatever the manifests already say.
+#    empty releases whatever the manifests already say — including for Go, which
+#    has no manifest and borrows the version its neighbours agree on.
 #
 # 2. Push a tag. Here the manifest is already the source of truth and the tag
 #    only has to agree with it; a mismatch fails before anything is uploaded.
@@ -95,6 +96,7 @@ jobs:
       cpp: ${{ steps.select.outputs.cpp }}
       version: ${{ steps.select.outputs.version }}
       assert_version: ${{ steps.select.outputs.assert_version }}
+      go_version: ${{ steps.go.outputs.go_version }}
       dry_run: ${{ steps.select.outputs.dry_run }}
       sha: ${{ steps.sha.outputs.sha }}
     permissions:
@@ -217,6 +219,22 @@ jobs:
           done
           echo "::notice::Dry run: the manifests above were rewritten in the runner and thrown away. Nothing was committed, and the jobs below build the versions currently on $GITHUB_REF_NAME."
           git checkout -- .
+
+      # Go is the one SDK with no manifest to fall back on, so with the input
+      # empty its tag has to borrow the version from the SDKs shipping beside it.
+      # Resolved here, not in the go job, so a release that cannot name Go's tag
+      # stops before anything is published rather than after.
+      - name: Resolve the version Go's tag will carry
+        id: go
+        if: steps.select.outputs.go == 'true'
+        env:
+          SELECTED: ${{ steps.select.outputs.selected }}
+          VERSION: ${{ steps.select.outputs.version }}
+        run: |
+          set -euo pipefail
+          go_version="$(./scripts/go-release-version.sh "$SELECTED" "$VERSION")"
+          echo "go_version=$go_version" >> "$GITHUB_OUTPUT"
+          echo "go will be tagged go/v$go_version"
 
       - name: Resolve the commit everything else builds from
         id: sha
@@ -501,18 +519,19 @@ jobs:
           done
           echo "::warning::proxy.golang.org has not picked up $mod@v$VERSION yet. The tag is pushed, so it will resolve on its own; nothing is broken."
 
-      # The version input is optional for the other five, which fall back to
-      # what their manifests already say. Go has no such fallback: there is no
-      # field anywhere in a Go module that records its own version, so with the
-      # input empty there is simply nothing to name a tag after.
-      - name: Require a version when releasing Go from a dispatch
+      # No field anywhere in a Go module records its own version, so the tag has
+      # to get one from somewhere else: the input if there is one, otherwise the
+      # manifests of the SDKs shipping alongside. plan does that work and fails
+      # the whole run if it cannot, so reaching this point with nothing set is a
+      # wiring mistake, not a user error.
+      - name: Report the tag this will get
         if: github.event_name != 'push' && needs.plan.outputs.dry_run != 'true'
         env:
-          VERSION: ${{ needs.plan.outputs.version }}
+          VERSION: ${{ needs.plan.outputs.go_version }}
         run: |
           set -euo pipefail
           if [ -z "$VERSION" ]; then
-            echo "::error::Releasing Go needs the version input. A Go module declares no version anywhere in its tree — the go/vX.Y.Z tag IS the version — so unlike the other five SDKs there is no manifest to fall back to." >&2
+            echo "::error::plan produced no go_version, yet the go job was selected. The 'Resolve the version Go's tag will carry' step should have made this impossible." >&2
             exit 1
           fi
           echo "will be tagged go/v$VERSION by the tag job"
@@ -649,7 +668,7 @@ jobs:
           SEL_GO: ${{ needs.plan.outputs.go }}
           SEL_JAVA: ${{ needs.plan.outputs.java }}
           SEL_CPP: ${{ needs.plan.outputs.cpp }}
-          GO_VERSION: ${{ needs.plan.outputs.version }}
+          GO_VERSION: ${{ needs.plan.outputs.go_version }}
         run: |
           set -euo pipefail
           git config user.name  'github-actions[bot]'
@@ -661,9 +680,11 @@ jobs:
             [ "$selected" = 'true' ] || continue
 
             if [ "$sdk" = 'go' ]; then
-              # No manifest to read; the go job already refused to get this far
-              # with an empty version.
+              # No manifest to read. plan resolved this — from the input, or
+              # from what the SDKs shipping alongside declare — and failed the
+              # run rather than let it reach here empty.
               version="$GO_VERSION"
+              [ -n "$version" ] || { echo "::error::go was selected but plan resolved no version for its tag" >&2; exit 1; }
               tag="go/v$version"
             else
               # Read from the manifest rather than trusting the input: the
