@@ -66,6 +66,11 @@ sub_first() {
 set_python() {
     sub_first "$REPO_ROOT/python/pyproject.toml" \
         '^version = "[^"]+"' "version = \"$VERSION\"" python
+    # statelet.__version__ is a second copy of the same number, and it is the
+    # one users read at runtime. Left out of this function it silently rots:
+    # 0.1.2 shipped to PyPI with __version__ still saying 0.1.1.
+    sub_first "$REPO_ROOT/python/statelet/__init__.py" \
+        '^__version__ = "[^"]+"' "__version__ = \"$VERSION\"" python
 }
 
 set_nodejs() {

@@ -60,6 +60,13 @@ case "$SDK" in
     python)
         VERSION="$(extract "$REPO_ROOT/python/pyproject.toml" \
             '^version[[:space:]]*=[[:space:]]*"([^"]+)".*' python)"
+        # The package declares its version twice: pyproject builds the artifact,
+        # statelet.__version__ is what the installed client reports. A release
+        # is the wrong place to discover they disagree.
+        RUNTIME="$(extract "$REPO_ROOT/python/statelet/__init__.py" \
+            '^__version__[[:space:]]*=[[:space:]]*"([^"]+)".*' python)"
+        [ "$RUNTIME" = "$VERSION" ] || die \
+            "python: pyproject.toml says $VERSION but statelet/__init__.py says $RUNTIME"
         ;;
     nodejs)
         VERSION="$(extract "$REPO_ROOT/nodejs/package.json" \
