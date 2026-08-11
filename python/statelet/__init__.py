@@ -90,4 +90,4 @@ __all__ = [
     # Agent memory
     "AgentMemory",
 ]
-__version__ = "0.1.3"
+__version__ = "0.1.4"
