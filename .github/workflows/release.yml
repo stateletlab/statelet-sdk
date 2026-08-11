@@ -721,7 +721,12 @@ jobs:
               continue
             fi
 
-            git tag -a "$tag" -m "$sdk SDK $version" "$GITHUB_SHA"
+            # HEAD, not $GITHUB_SHA. When plan wrote a version it committed and
+            # pushed one, so $GITHUB_SHA is the commit BEFORE the bump — the
+            # wrong tree to tag, and not even present here: the checkout above
+            # is a depth-1 fetch of plan's commit, so its parent is missing and
+            # `git tag -a <missing oid>` dies with "bad object type".
+            git tag -a "$tag" -m "$sdk SDK $version"
             git push origin "$tag"
             echo "pushed $tag"
             tagged+=("$tag")
