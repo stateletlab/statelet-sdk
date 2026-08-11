@@ -605,20 +605,41 @@ jobs:
             ${{ steps.pack.outputs.tarball }}
             ${{ steps.pack.outputs.tarball }}.sha256
 
+      # Not gated on the event. The tag job runs after this one and pushes
+      # cpp-v<version> itself, but a tag pushed with GITHUB_TOKEN does not
+      # trigger another workflow run — so gating this on `push` meant the
+      # dispatch path produced a tag with no release behind it, and no re-run
+      # could ever fix it because the re-run took the same branch.
+      #
+      # Deriving the tag from the version instead of github.ref_name makes one
+      # code path serve both events: on a tag push the two agree, and on a
+      # dispatch --target pins the release to the commit that was built, which
+      # is the commit the tag job would have tagged.
       - name: Attach to the GitHub Release
-        if: needs.plan.outputs.dry_run != 'true' && github.event_name == 'push'
+        if: needs.plan.outputs.dry_run != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          TAG: cpp-v${{ steps.v.outputs.version }}
+          PUSHED_TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
           TARBALL: ${{ steps.pack.outputs.tarball }}
         run: |
           set -euo pipefail
+          # On a tag push the derived tag must be the one that was pushed;
+          # if it is not, the manifest and the tag disagree and attaching the
+          # tarball to either would be a lie about what it contains.
+          if [ -n "$PUSHED_TAG" ] && [ "$PUSHED_TAG" != "$TAG" ]; then
+            echo "::error::pushed tag $PUSHED_TAG does not match $TAG, the version in cpp's manifest" >&2
+            exit 1
+          fi
+
           if ! gh release view "$TAG" >/dev/null 2>&1; then
             gh release create "$TAG" \
+              --target "$GITHUB_SHA" \
               --title "C++ SDK ${{ steps.v.outputs.version }}" \
               --notes "Self-contained CMake source tree for the Statelet C++ client. Verify with the accompanying .sha256."
           fi
           gh release upload "$TAG" "$TARBALL" "$TARBALL.sha256" --clobber
+          echo "attached $TARBALL to $TAG"
 
   # ── tag what was just released ──────────────────────────────────────────────
   # A tag push is still the primary trigger and this job does nothing for it.
