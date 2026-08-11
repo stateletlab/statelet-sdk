@@ -26,7 +26,17 @@ name: Release SDKs
 #
 # Versions stay per-SDK either way: `sdks` decides who moves, so releasing two
 # at one version and leaving the rest behind is the normal case, not a
-# workaround. dry_run defaults to on.
+# workaround. dry_run defaults to on, and a dry run does NOT write the version
+# to the branch — it rehearses the rewrite in the runner, throws it away, and
+# builds the manifests as they stand. So the versions a dry run reports are the
+# committed ones, not the one that was typed in.
+#
+# Re-running after a partial failure is safe and is the intended repair: each
+# publish step first asks its registry whether that exact version is already
+# there, and skips itself if so. Without that, one failed SDK poisoned the whole
+# release — the re-run died on the five that had already published, so the tag
+# job (which needs all six green) never ran. 0.1.2 shipped to every registry and
+# was tagged on none of them, twice in a row, for exactly that reason.
 #
 # The bump commit is pushed with GITHUB_TOKEN, which by design raises no events
 # — that is what stops this workflow retriggering itself on its own commit, and
@@ -84,6 +94,7 @@ jobs:
       java: ${{ steps.select.outputs.java }}
       cpp: ${{ steps.select.outputs.cpp }}
       version: ${{ steps.select.outputs.version }}
+      assert_version: ${{ steps.select.outputs.assert_version }}
       dry_run: ${{ steps.select.outputs.dry_run }}
       sha: ${{ steps.sha.outputs.sha }}
     permissions:
@@ -132,9 +143,21 @@ jobs:
               *)          echo "$sdk=false" >> "$GITHUB_OUTPUT" ;;
             esac
           done
-          echo "version=$version"   >> "$GITHUB_OUTPUT"
-          echo "dry_run=$dry_run"   >> "$GITHUB_OUTPUT"
-          echo "selected=$selected" >> "$GITHUB_OUTPUT"
+          # What the per-SDK jobs assert their manifest against, which is not
+          # always what was asked for. A dry run rehearses the version bump and
+          # then throws it away, and those jobs check out the untouched commit —
+          # so asserting the requested version there fails every dry run that
+          # names one, which is every dry run worth doing. The rehearsal is what
+          # proves the version is writable; leave the assert to the real run.
+          assert_version="$version"
+          if [ "$EVENT" != "push" ] && [ "$dry_run" = "true" ]; then
+            assert_version=""
+          fi
+
+          echo "version=$version"               >> "$GITHUB_OUTPUT"
+          echo "assert_version=$assert_version" >> "$GITHUB_OUTPUT"
+          echo "dry_run=$dry_run"               >> "$GITHUB_OUTPUT"
+          echo "selected=$selected"             >> "$GITHUB_OUTPUT"
 
           {
             echo "### Release plan"
@@ -224,7 +247,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - run: ./scripts/sdk-version.sh python '${{ needs.plan.outputs.version }}'
+      - run: ./scripts/sdk-version.sh python '${{ needs.plan.outputs.assert_version }}'
 
       - name: Build
         working-directory: python
@@ -238,8 +261,13 @@ jobs:
           name: statelet-dist
           path: python/dist/*
 
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Already on PyPI?
+        id: published
         if: needs.plan.outputs.dry_run != 'true'
+        run: ./scripts/publish-gate.sh python
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        if: needs.plan.outputs.dry_run != 'true' && steps.published.outputs.skip != 'true'
         with:
           packages-dir: python/dist/
 
@@ -270,7 +298,7 @@ jobs:
           npm install -g npm@latest
           npm --version
 
-      - run: ./scripts/sdk-version.sh nodejs '${{ needs.plan.outputs.version }}'
+      - run: ./scripts/sdk-version.sh nodejs '${{ needs.plan.outputs.assert_version }}'
 
       - name: Install
         working-directory: nodejs
@@ -302,8 +330,13 @@ jobs:
       # equivalent of PyPI's pending publishers, so the publisher can only be
       # attached to a package that already exists. statelet-sdk@0.1.0 was pushed
       # by hand to get past that; every release from 0.1.1 on runs here.
-      - name: Publish
+      - name: Already on npm?
+        id: published
         if: needs.plan.outputs.dry_run != 'true'
+        run: ./scripts/publish-gate.sh nodejs
+
+      - name: Publish
+        if: needs.plan.outputs.dry_run != 'true' && steps.published.outputs.skip != 'true'
         working-directory: nodejs
         run: npm publish --provenance --access public
 
@@ -322,7 +355,7 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - run: ./scripts/sdk-version.sh rust '${{ needs.plan.outputs.version }}'
+      - run: ./scripts/sdk-version.sh rust '${{ needs.plan.outputs.assert_version }}'
 
       - name: Clippy
         working-directory: rust
@@ -339,8 +372,13 @@ jobs:
         working-directory: rust
         run: cargo package
 
-      - name: Publish
+      - name: Already on crates.io?
+        id: published
         if: needs.plan.outputs.dry_run != 'true'
+        run: ./scripts/publish-gate.sh rust
+
+      - name: Publish
+        if: needs.plan.outputs.dry_run != 'true' && steps.published.outputs.skip != 'true'
         working-directory: rust
         run: cargo publish
         env:
@@ -370,7 +408,7 @@ jobs:
           server-username: MAVEN_CENTRAL_USERNAME
           server-password: MAVEN_CENTRAL_PASSWORD
 
-      - run: ./scripts/sdk-version.sh java '${{ needs.plan.outputs.version }}'
+      - run: ./scripts/sdk-version.sh java '${{ needs.plan.outputs.assert_version }}'
 
       - name: Test
         run: mvn --batch-mode test
@@ -383,14 +421,19 @@ jobs:
         working-directory: java
         run: mvn --batch-mode -P release verify -Dgpg.skip=true
 
-      - name: Import the signing key
+      - name: Already on Maven Central?
+        id: published
         if: needs.plan.outputs.dry_run != 'true'
+        run: ./scripts/publish-gate.sh java
+
+      - name: Import the signing key
+        if: needs.plan.outputs.dry_run != 'true' && steps.published.outputs.skip != 'true'
         env:
           MAVEN_GPG_PRIVATE_KEY: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }}
         run: printf '%s' "$MAVEN_GPG_PRIVATE_KEY" | gpg --batch --import
 
       - name: Publish
-        if: needs.plan.outputs.dry_run != 'true'
+        if: needs.plan.outputs.dry_run != 'true' && steps.published.outputs.skip != 'true'
         working-directory: java
         run: mvn --batch-mode -P release deploy
         env:
@@ -497,7 +540,14 @@ jobs:
 
       - name: Resolve the version
         id: v
-        run: echo "version=$(./scripts/sdk-version.sh cpp '${{ needs.plan.outputs.version }}')" >> "$GITHUB_OUTPUT"
+        # Assigned on its own line, not interpolated straight into the echo:
+        # a command substitution inside an argument hands its exit status to
+        # echo, which always succeeds. That is how a version mismatch here once
+        # passed as a green job that packed statelet-cpp-.tar.gz.
+        run: |
+          set -euo pipefail
+          version="$(./scripts/sdk-version.sh cpp '${{ needs.plan.outputs.assert_version }}')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Configure
         working-directory: cpp
@@ -562,6 +612,12 @@ jobs:
   # release that failed halfway. Go is the exception in spirit — its tag IS the
   # release — but the ordering still holds: the go job verifies the tree, then
   # this job tags it and warms the proxy.
+  #
+  # The flip side used to be that a release which failed halfway could never be
+  # tagged at all: the repair run died on whatever had already published, so
+  # this job stayed skipped forever. The publish steps skip an already-published
+  # version now, so the second run reaches here with all six green and tags what
+  # is actually out there.
   #
   # Pushing with GITHUB_TOKEN does NOT re-trigger this workflow, even though
   # `on.push.tags` matches what is created here: GitHub deliberately suppresses

@@ -106,6 +106,28 @@ marks against it on the branch.
 Tags are created after the publish jobs succeed, never before, so a tag cannot end up
 claiming a release that failed halfway. An existing tag is left alone with a warning.
 
+**A dry run does not write the version to the branch.** It rehearses the rewrite in the
+runner and throws it away, so the versions the jobs report are the committed ones, not the
+one you typed. That is also why the per-SDK version check is relaxed on a dry run: the
+rehearsal is what proves the version is writable, and asserting it against a tree that was
+deliberately reverted would fail every dry run that names a version.
+
+### Re-running a release that failed halfway
+
+Just run it again with the same inputs. Each publish step asks its registry whether that
+exact version is already there (`scripts/is-published.sh`, via `scripts/publish-gate.sh`)
+and skips itself if so, so the re-run publishes only what is missing and then reaches the
+tag job.
+
+This matters more than it sounds. The tag job needs all six SDKs green in one run, and
+before the check existed a single failed SDK made that unreachable forever: the repair run
+died on the five that had already published, because no registry lets a version be
+published twice. `0.1.2` went out to PyPI, npm, crates.io and Maven Central that way and
+was tagged on none of them.
+
+A registry that cannot be reached is a failure, not a skip — otherwise an outage would
+look like a successful release that shipped nothing.
+
 Go needs `version` where the others treat it as optional. Every other SDK can fall back to
 its manifest; a Go module records its version nowhere — the `go/vX.Y.Z` tag *is* the
 version — so with the field empty there is nothing to name a tag after, and the job says
