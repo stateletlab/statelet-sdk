@@ -31,6 +31,13 @@ name: Release SDKs
 # builds the manifests as they stand. So the versions a dry run reports are the
 # committed ones, not the one that was typed in.
 #
+# Re-running after a partial failure is safe and is the intended repair: each
+# publish step first asks its registry whether that exact version is already
+# there, and skips itself if so. Without that, one failed SDK poisoned the whole
+# release — the re-run died on the five that had already published, so the tag
+# job (which needs all six green) never ran. 0.1.2 shipped to every registry and
+# was tagged on none of them, twice in a row, for exactly that reason.
+#
 # The bump commit is pushed with GITHUB_TOKEN, which by design raises no events
 # — that is what stops this workflow retriggering itself on its own commit, and
 # it also means CI does not run on that commit. The release jobs build and test
@@ -254,8 +261,13 @@ jobs:
           name: statelet-dist
           path: python/dist/*
 
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Already on PyPI?
+        id: published
         if: needs.plan.outputs.dry_run != 'true'
+        run: ./scripts/publish-gate.sh python
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        if: needs.plan.outputs.dry_run != 'true' && steps.published.outputs.skip != 'true'
         with:
           packages-dir: python/dist/
 
@@ -318,8 +330,13 @@ jobs:
       # equivalent of PyPI's pending publishers, so the publisher can only be
       # attached to a package that already exists. statelet-sdk@0.1.0 was pushed
       # by hand to get past that; every release from 0.1.1 on runs here.
-      - name: Publish
+      - name: Already on npm?
+        id: published
         if: needs.plan.outputs.dry_run != 'true'
+        run: ./scripts/publish-gate.sh nodejs
+
+      - name: Publish
+        if: needs.plan.outputs.dry_run != 'true' && steps.published.outputs.skip != 'true'
         working-directory: nodejs
         run: npm publish --provenance --access public
 
@@ -355,8 +372,13 @@ jobs:
         working-directory: rust
         run: cargo package
 
-      - name: Publish
+      - name: Already on crates.io?
+        id: published
         if: needs.plan.outputs.dry_run != 'true'
+        run: ./scripts/publish-gate.sh rust
+
+      - name: Publish
+        if: needs.plan.outputs.dry_run != 'true' && steps.published.outputs.skip != 'true'
         working-directory: rust
         run: cargo publish
         env:
@@ -399,14 +421,19 @@ jobs:
         working-directory: java
         run: mvn --batch-mode -P release verify -Dgpg.skip=true
 
-      - name: Import the signing key
+      - name: Already on Maven Central?
+        id: published
         if: needs.plan.outputs.dry_run != 'true'
+        run: ./scripts/publish-gate.sh java
+
+      - name: Import the signing key
+        if: needs.plan.outputs.dry_run != 'true' && steps.published.outputs.skip != 'true'
         env:
           MAVEN_GPG_PRIVATE_KEY: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }}
         run: printf '%s' "$MAVEN_GPG_PRIVATE_KEY" | gpg --batch --import
 
       - name: Publish
-        if: needs.plan.outputs.dry_run != 'true'
+        if: needs.plan.outputs.dry_run != 'true' && steps.published.outputs.skip != 'true'
         working-directory: java
         run: mvn --batch-mode -P release deploy
         env:
@@ -585,6 +612,12 @@ jobs:
   # release that failed halfway. Go is the exception in spirit — its tag IS the
   # release — but the ordering still holds: the go job verifies the tree, then
   # this job tags it and warms the proxy.
+  #
+  # The flip side used to be that a release which failed halfway could never be
+  # tagged at all: the repair run died on whatever had already published, so
+  # this job stayed skipped forever. The publish steps skip an already-published
+  # version now, so the second run reaches here with all six green and tags what
+  # is actually out there.
   #
   # Pushing with GITHUB_TOKEN does NOT re-trigger this workflow, even though
   # `on.push.tags` matches what is created here: GitHub deliberately suppresses
