@@ -721,12 +721,49 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # C++'s release artifact is the tarball on its GitHub Release, and on this
+      # path the cpp job could not attach it: its attach step needs the
+      # cpp-vX.Y.Z tag, which only exists once this job creates it — and pushing
+      # that tag with GITHUB_TOKEN raises no event, so no push run ever comes
+      # back to finish the work. 0.1.3 shipped exactly that way: tagged, no
+      # tarball. So the asset is attached here, from the artifact the cpp job
+      # built and verified. Unconditional on whether the tag was created just
+      # now or already existed — a re-release with an existing tag is precisely
+      # the case where the asset may still be missing.
+      - uses: actions/download-artifact@v4
+        if: needs.plan.outputs.cpp == 'true'
+        with:
+          name: statelet-cpp-source
+
+      - name: Attach the C++ tarball to its GitHub Release
+        if: needs.plan.outputs.cpp == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="$(./scripts/sdk-version.sh cpp)"
+          tag="cpp-v$version"
+          tarball="statelet-cpp-$version.tar.gz"
+          [ -f "$tarball" ] || { echo "::error::the cpp job's artifact did not contain $tarball" >&2; exit 1; }
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" \
+              --title "C++ SDK $version" \
+              --notes "Self-contained CMake source tree for the Statelet C++ client. Verify with the accompanying .sha256."
+          fi
+          gh release upload "$tag" "$tarball" "$tarball.sha256" --clobber
+          echo "attached $tarball to the $tag release"
+
       # Only reachable on the dispatch path; the push path warms the proxy in
-      # the go job, where the tag already exists on arrival.
+      # the go job, where the tag already exists on arrival. go_version, not
+      # version: with the input left empty — the normal dispatch once the
+      # manifests are bumped — `version` is the empty string, and `go get @v`
+      # would burn five retries on a malformed query and then warn about a tag
+      # that was never asked for. go_version is what the tag above actually
+      # carries, whichever way plan resolved it.
       - name: Warm the module proxy
         if: needs.plan.outputs.go == 'true'
         env:
-          VERSION: ${{ needs.plan.outputs.version }}
+          VERSION: ${{ needs.plan.outputs.go_version }}
         run: |
           set -euo pipefail
           mod='github.com/stateletlab/statelet-sdk/go'
