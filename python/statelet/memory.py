@@ -57,6 +57,14 @@ class AgentMemory:
             prefix scan on KV.
         dim: Embedding dimensionality (required if *embed_fn* is provided).
         auto_init: Automatically create graph + vector indexes on first use.
+        token: JWT for authenticated gateways — passed straight to the
+            underlying :class:`StateletClient`. Obtain one with
+            :meth:`StateletClient.login` (or pass *username*/*password* below
+            to log in automatically). Without it, a gateway running with auth
+            enabled rejects every call with ``UNAUTHENTICATED``.
+        username / password / mgmt_addr: Convenience auto-login: when *token*
+            is not given but *username* is, logs in against the management API
+            (default ``<host>:9380``) and uses the returned JWT.
     """
 
     def __init__(
@@ -66,8 +74,18 @@ class AgentMemory:
         embed_fn=None,
         dim: int = 0,
         auto_init: bool = True,
+        *,
+        token: Optional[str] = None,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+        mgmt_addr: Optional[str] = None,
     ):
-        self._client = StateletClient(addr, cf=_KV_CF)
+        if token is None and username is not None:
+            host = addr.rsplit(":", 1)[0]
+            token = StateletClient.login(
+                mgmt_addr or f"{host}:9380", username, password or ""
+            )
+        self._client = StateletClient(addr, cf=_KV_CF, token=token)
         self._agent_id = agent_id
         self._embed_fn = embed_fn
         self._dim = dim
