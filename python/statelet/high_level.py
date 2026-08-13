@@ -349,6 +349,47 @@ class Client:
         next_cursor = resp.next_cursor if resp.next_cursor else None
         return entries, next_cursor
 
+    # ── Memory Query DSL ─────────────────────────────────────────────
+
+    def graph_query(
+        self,
+        cypher: str,
+        graph_name: str = "",
+        max_rows: int = 0,
+        as_of: int = 0,
+        tx_as_of: int = 0,
+        timeout_s: Optional[float] = None,
+    ):
+        """Run a read-only openCypher-subset query (the ``GraphQuery`` RPC).
+
+        Same contract as :meth:`statelet.StateletClient.graph_query`, exposed
+        here so the documented Memory Query DSL examples work on the
+        high-level client too — it rides this client's existing channel (and
+        therefore its auth token). Returns a
+        :class:`statelet.client.GraphQueryResult`.
+        """
+        from .client import GraphQueryResult, StateletClient, _graph_query_value
+
+        resp = self._kv.GraphQuery(
+            pb.GraphQueryRequest(
+                graph_name=graph_name,
+                cypher=cypher,
+                max_rows=max_rows,
+                as_of=as_of,
+                tx_as_of=tx_as_of,
+            ),
+            timeout=(
+                StateletClient.DEFAULT_TEXT_GRAPH_SEARCH_TIMEOUT_S
+                if timeout_s is None
+                else timeout_s
+            ),
+        )
+        return GraphQueryResult(
+            columns=list(resp.columns),
+            rows=[[_graph_query_value(v) for v in row.values] for row in resp.rows],
+            warnings=list(resp.warnings),
+        )
+
     # ── Agent State: Causal Graph ────────────────────────────────────────
 
     def add_step(
