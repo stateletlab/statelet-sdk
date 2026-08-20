@@ -422,7 +422,17 @@ class StateletClient:
         """
         op_map = {"put": pb.PUT, "delete": pb.DELETE, "merge": pb.MERGE}
         proto_entries = []
-        for e in entries:
+        for i, e in enumerate(entries):
+            if not isinstance(e, dict):
+                raise TypeError(
+                    f"batch_write entries must be dicts like "
+                    f'{{"op": "put", "key": b"k", "value": b"v"}}; '
+                    f"entry {i} is {type(e).__name__}"
+                )
+            if e.get("op") not in op_map:
+                raise ValueError(
+                    f'entry {i}: "op" must be one of {sorted(op_map)}, got {e.get("op")!r}'
+                )
             proto_entries.append(
                 pb.WriteEntry(
                     cf=e.get("cf", self._cf),
@@ -493,6 +503,10 @@ class StateletClient:
         shard_id: int = 0,
     ) -> Iterator[CommittedChange]:
         """Consume the durable, ordered, resumable committed change-feed (CDC).
+
+        Requires an enterprise (statelet-ee) server build — the core build
+        (including the ``statelet-lite`` PyPI binary) answers UNIMPLEMENTED,
+        which this iterator raises immediately.
 
         Yields :class:`CommittedChange` items in stable Raft-offset order. Offsets
         are client-managed (Kafka-style): supply a ``subscription_id`` and a
@@ -616,7 +630,22 @@ class StateletClient:
                 # A clean stream end / compaction reconnect is not a failure;
                 # reset backoff so transient cleans don't accumulate delay.
                 backoff = self._CDC_BACKOFF_BASE_S
-            except grpc.RpcError:
+            except grpc.RpcError as e:
+                # Only transient transport conditions are worth a silent
+                # reconnect. Permanent conditions used to be swallowed here
+                # too, which made a core (non-enterprise) server's
+                # UNIMPLEMENTED look like an eternally-empty feed (API audit
+                # 2026-08-20 item 6) — surface those immediately.
+                _PERMANENT = (
+                    grpc.StatusCode.UNIMPLEMENTED,
+                    grpc.StatusCode.UNAUTHENTICATED,
+                    grpc.StatusCode.PERMISSION_DENIED,
+                    grpc.StatusCode.INVALID_ARGUMENT,
+                    grpc.StatusCode.FAILED_PRECONDITION,
+                    grpc.StatusCode.NOT_FOUND,
+                )
+                if e.code() in _PERMANENT:
+                    raise
                 # Disconnect: resume from the next unprocessed offset after a
                 # bounded exponential backoff. at-least-once on reconnect.
                 next_offset = last_offset + 1
@@ -725,6 +754,12 @@ class StateletClient:
         second-stage reranker (cross-encoder or model-free score-fusion). See
         :class:`RerankSpec` and ``docs/reranking.md`` for the two models and
         ``signal_blend`` semantics.
+        
+
+        NOTE: ``mmr`` / ``mmr_lambda`` / ``mmr_pool`` / ``rerank`` are not yet
+        implemented for unified vector indexes — the server answers
+        UNIMPLEMENTED until the shared-vecidx consolidation lands.
+        ``group_field`` / ``groups`` work.
         """
         req = pb.VectorSearchRequest(
             index_name=index_name, query=query, k=k, ef_search=ef_search

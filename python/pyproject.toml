@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "statelet-sdk"
-version = "0.1.4"
+version = "0.1.5"
 description = "Python SDK for Statelet — agent memory with KV, vector search, and temporal causal graphs in one database"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = "Apache-2.0"
 keywords = ["statelet", "agent", "memory", "vector", "graph", "database", "llm", "ai"]
 classifiers = [
@@ -18,7 +18,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
 ]
 dependencies = [
-    "grpcio>=1.60",
+    "grpcio>=1.81",
     "protobuf>=4.25",
 ]
 
