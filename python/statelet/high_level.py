@@ -108,6 +108,14 @@ class _AsyncAuthInterceptor(grpc.aio.UnaryUnaryClientInterceptor, grpc.aio.Unary
 # ── Result types ─────────────────────────────────────────────────────────────
 
 
+#: Legal ``step_type`` values for :meth:`add_step` (PascalCase).
+STEP_TYPES = ("Observe", "Think", "Act", "Tool", "Result")
+#: Legal ``edge_type`` values for :meth:`add_edge` / edge filters (PascalCase).
+EDGE_TYPES = ("Triggers", "Informs", "Branches", "Merges")
+#: Legal ``direction`` values for :meth:`get_edges` / :meth:`traverse` (lowercase).
+DIRECTIONS = ("forward", "backward", "both")
+
+
 @dataclass
 class Step:
     """A causal step returned by get_step / traverse."""
@@ -116,23 +124,38 @@ class Step:
     agent_id: str = ""
     step_type: str = ""
     branch_id: int = 0
+    #: Step content is NOT carried in the step record — fetch it with
+    #: ``get_content(step_id)``. Kept for backward compatibility; always b"".
     content: bytes = b""
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    #: Raw metadata bytes, exactly as passed to ``add_step`` (symmetric).
+    metadata: bytes = b""
     created_at: int = 0
+    embedding_id: Optional[int] = None
 
     @classmethod
     def _from_json(cls, raw: bytes) -> "Step":
         if not raw:
             return cls()
         d = json.loads(raw)
+        # The server serializes its CausalStep verbatim: `id` (not step_id),
+        # `timestamp` (ms, not created_at) and `metadata` as a JSON byte
+        # array. Accept both spellings so either side may evolve.
+        meta = d.get("metadata", b"")
+        if isinstance(meta, list):
+            meta = bytes(meta)
+        elif isinstance(meta, str):
+            meta = meta.encode()
+        elif not isinstance(meta, (bytes, bytearray)):
+            meta = json.dumps(meta).encode()
         return cls(
-            step_id=d.get("step_id", 0),
+            step_id=d.get("id", d.get("step_id", 0)),
             agent_id=d.get("agent_id", ""),
             step_type=d.get("step_type", ""),
             branch_id=d.get("branch_id", 0),
-            content=d.get("content", "").encode() if isinstance(d.get("content"), str) else b"",
-            metadata=d.get("metadata", {}),
-            created_at=d.get("created_at", 0),
+            content=b"",
+            metadata=bytes(meta),
+            created_at=d.get("timestamp", d.get("created_at", 0)),
+            embedding_id=d.get("embedding_id"),
         )
 
 
@@ -402,7 +425,14 @@ class Client:
         embedding: Optional[List[float]] = None,
         branch_id: int = 0,
     ) -> int:
-        """Add a causal step. Returns the step_id."""
+        """Add a causal step. Returns the step_id.
+
+        ``step_type`` must be one of :data:`STEP_TYPES`
+        (``Observe/Think/Act/Tool/Result`` — PascalCase).
+        ``embedding``: on first use the server auto-creates the internal
+        ``_agent_embeddings`` index with this embedding's dimension; keep the
+        dimension consistent across steps.
+        """
         resp = self._agent.AddStep(
             pb.AgentAddStepRequest(
                 agent_id=agent_id,
@@ -457,6 +487,13 @@ class Client:
         window_start: int = 0,
         window_end: int = 0,
     ) -> List[Edge]:
+        """Edges attached to a step.
+
+        ``direction``: one of :data:`DIRECTIONS` (``forward/backward/both``;
+        window queries support ``forward`` only). ``edge_type`` filter: one of
+        :data:`EDGE_TYPES` (``Triggers/Informs/Branches/Merges`` — PascalCase),
+        or empty for all.
+        """
         resp = self._agent.GetEdges(
             pb.AgentGetEdgesRequest(
                 step_id=step_id,
