@@ -118,7 +118,13 @@ DIRECTIONS = ("forward", "backward", "both")
 
 @dataclass
 class Step:
-    """A causal step returned by get_step / traverse."""
+    """A causal step's METADATA record, returned by get_step / traverse.
+
+    ``content`` is always ``b""`` here — by design, not by accident: the
+    engine stores step content under a separate role so metadata reads never
+    drag a potentially large blob across the wire. Fetch the payload with
+    :meth:`Client.get_content(step_id) <Client.get_content>` when you need it.
+    """
 
     step_id: int = 0
     agent_id: str = ""
@@ -468,12 +474,21 @@ class Client:
         )
 
     def get_step(self, step_id: int) -> Optional[Step]:
+        """Fetch a step's metadata record, or ``None`` if it does not exist.
+
+        The returned :class:`Step` never carries the content payload
+        (``step.content`` is always ``b""``) — content lives under its own
+        storage role and is fetched separately with :meth:`get_content`.
+        """
         resp = self._agent.GetStep(pb.AgentGetStepRequest(step_id=step_id))
         if not resp.found:
             return None
         return Step._from_json(resp.step_json)
 
     def get_content(self, step_id: int) -> Optional[bytes]:
+        """Fetch a step's content payload (the bytes passed to ``add_step``),
+        or ``None`` if the step does not exist. Companion to :meth:`get_step`,
+        which returns only the metadata record."""
         resp = self._agent.GetContent(pb.AgentGetContentRequest(step_id=step_id))
         return resp.content if resp.found else None
 
@@ -930,12 +945,21 @@ class AsyncClient:
         )
 
     async def get_step(self, step_id: int) -> Optional[Step]:
+        """Fetch a step's metadata record, or ``None`` if it does not exist.
+
+        The returned :class:`Step` never carries the content payload
+        (``step.content`` is always ``b""``) — content lives under its own
+        storage role and is fetched separately with :meth:`get_content`.
+        """
         resp = await self._agent.GetStep(pb.AgentGetStepRequest(step_id=step_id))
         if not resp.found:
             return None
         return Step._from_json(resp.step_json)
 
     async def get_content(self, step_id: int) -> Optional[bytes]:
+        """Fetch a step's content payload (the bytes passed to ``add_step``),
+        or ``None`` if the step does not exist. Companion to :meth:`get_step`,
+        which returns only the metadata record."""
         resp = await self._agent.GetContent(pb.AgentGetContentRequest(step_id=step_id))
         return resp.content if resp.found else None
 
