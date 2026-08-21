@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterator, List, Optional
 
 import json
+import logging
 import os
 import tempfile
 import time
@@ -21,6 +22,8 @@ except ImportError:  # pragma: no cover - very old interpreters
 
 from statelet import statelet_pb2 as pb
 from statelet import statelet_pb2_grpc as pb_grpc
+
+_LOG = logging.getLogger("statelet.client")
 
 def _conflict_policy_enum(policy: str) -> int:
     """Map a conflict-policy name to the ``ConflictPolicy`` enum used by the
@@ -500,7 +503,7 @@ class StateletClient:
         subscription_id: Optional[str] = None,
         checkpoint: Optional[CheckpointStore] = None,
         auto_commit: bool = True,
-        shard_id: int = 0,
+        shard_id: int = 1,
     ) -> Iterator[CommittedChange]:
         """Consume the durable, ordered, resumable committed change-feed (CDC).
 
@@ -545,7 +548,10 @@ class StateletClient:
             subscription_id: Logical consumer id used as the checkpoint key.
             checkpoint: A :class:`CheckpointStore` (e.g. :class:`FileCheckpointStore`).
             auto_commit: Commit each offset after the item is processed.
-            shard_id: Target shard (``0`` = single-node default).
+            shard_id: Target shard's id. Shard ids are numbered **from 1**;
+                the default subscribes to shard 1 (the only shard on a fresh
+                single-node deployment). There is no shard 0 — servers reject
+                it, and on older servers it hung in the reconnect loop forever.
         """
         effective_cf = cf if cf is not None else self._cf
         do_commit = (
@@ -564,6 +570,7 @@ class StateletClient:
         # Track the highest offset we have observed so reconnect can resume.
         last_offset = next_offset - 1 if next_offset > 0 else 0
         backoff = self._CDC_BACKOFF_BASE_S
+        retries = 0
 
         while True:
             try:
@@ -630,6 +637,7 @@ class StateletClient:
                 # A clean stream end / compaction reconnect is not a failure;
                 # reset backoff so transient cleans don't accumulate delay.
                 backoff = self._CDC_BACKOFF_BASE_S
+                retries = 0
             except grpc.RpcError as e:
                 # Only transient transport conditions are worth a silent
                 # reconnect. Permanent conditions used to be swallowed here
@@ -648,6 +656,20 @@ class StateletClient:
                     raise
                 # Disconnect: resume from the next unprocessed offset after a
                 # bounded exponential backoff. at-least-once on reconnect.
+                # Never silently: an endless-retry condition (e.g. a shard id
+                # the server keeps answering UNAVAILABLE for) used to hang
+                # with zero output — log the first retry and every tenth.
+                retries += 1
+                if retries == 1 or retries % 10 == 0:
+                    _LOG.warning(
+                        "subscribe_committed(shard_id=%s) reconnecting "
+                        "(attempt %d, backoff %.1fs) after %s: %s",
+                        shard_id,
+                        retries,
+                        backoff,
+                        e.code(),
+                        e.details(),
+                    )
                 next_offset = last_offset + 1
                 time.sleep(backoff)
                 backoff = min(backoff * 2.0, self._CDC_BACKOFF_MAX_S)
