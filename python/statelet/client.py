@@ -652,7 +652,14 @@ class StateletClient:
                     grpc.StatusCode.FAILED_PRECONDITION,
                     grpc.StatusCode.NOT_FOUND,
                 )
-                if e.code() in _PERMANENT:
+                # A bare grpc.RpcError carries no status: code()/details()
+                # live on the grpc.Call mixin, which real channel errors have
+                # but plain RpcError subclasses (test fakes, some
+                # interceptors) do not. Treat a status-less error as
+                # transient — only a definite permanent code justifies
+                # killing a feed that reconnection could revive.
+                code = e.code() if callable(getattr(e, "code", None)) else None
+                if code in _PERMANENT:
                     raise
                 # Disconnect: resume from the next unprocessed offset after a
                 # bounded exponential backoff. at-least-once on reconnect.
@@ -661,14 +668,19 @@ class StateletClient:
                 # with zero output — log the first retry and every tenth.
                 retries += 1
                 if retries == 1 or retries % 10 == 0:
+                    details = (
+                        e.details()
+                        if callable(getattr(e, "details", None))
+                        else str(e)
+                    )
                     _LOG.warning(
                         "subscribe_committed(shard_id=%s) reconnecting "
                         "(attempt %d, backoff %.1fs) after %s: %s",
                         shard_id,
                         retries,
                         backoff,
-                        e.code(),
-                        e.details(),
+                        code,
+                        details,
                     )
                 next_offset = last_offset + 1
                 time.sleep(backoff)
