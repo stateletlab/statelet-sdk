@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import time
+import warnings
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -53,8 +54,9 @@ class AgentMemory:
         addr: Statelet gRPC address (default ``"127.0.0.1:9379"``).
         agent_id: Namespace for this agent's memories.
         embed_fn: Optional callable ``(text) -> List[float]`` for embedding.
-            If not provided, vector search is disabled and recall falls back to
-            prefix scan on KV.
+            If not provided, vector search is disabled and :meth:`recall`
+            falls back to a KV prefix scan of the most recent entries —
+            **ignoring the query text** (it warns once when that happens).
         dim: Embedding dimensionality (required if *embed_fn* is provided).
         auto_init: Automatically create graph + vector indexes on first use.
         token: JWT for authenticated gateways — passed straight to the
@@ -194,13 +196,24 @@ class AgentMemory:
     ) -> List[MemoryEntry]:
         """Retrieve the most relevant past observations.
 
-        Uses vector search if an embedding function is available,
-        otherwise falls back to a KV prefix scan (most recent).
+        Uses vector search if an embedding function is available, otherwise
+        falls back to a KV prefix scan of the most recent entries. In that
+        fallback *query* is ignored — a :class:`RuntimeWarning` is emitted so
+        the degradation is visible instead of silently returning
+        recency-ordered results.
         """
         self._ensure_init()
 
         if self._embed_fn:
             return self._recall_vector(query, k)
+        if query:
+            warnings.warn(
+                "AgentMemory.recall() has no embed_fn: the query is ignored and "
+                "the most recent entries are returned. Pass embed_fn= and dim= "
+                "to AgentMemory to enable semantic recall.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
         return self._recall_kv(k)
 
     def _recall_vector(self, query: str, k: int) -> List[MemoryEntry]:
