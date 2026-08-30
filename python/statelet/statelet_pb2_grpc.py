@@ -633,6 +633,11 @@ class StateletStub:
                 request_serializer=statelet__pb2.GraphBatchReadRequest.SerializeToString,
                 response_deserializer=statelet__pb2.GraphBatchReadResponse.FromString,
                 _registered_method=True)
+        self.GraphVlogFetch = channel.unary_unary(
+                '/statelet.v1.Statelet/GraphVlogFetch',
+                request_serializer=statelet__pb2.GraphVlogFetchRequest.SerializeToString,
+                response_deserializer=statelet__pb2.GraphVlogFetchResponse.FromString,
+                _registered_method=True)
         self.GraphSearch = channel.unary_unary(
                 '/statelet.v1.Statelet/GraphSearch',
                 request_serializer=statelet__pb2.GraphSearchRequest.SerializeToString,
@@ -1772,6 +1777,18 @@ class StateletServicer:
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def GraphVlogFetch(self, request, context):
+        """Internal data-node RPC: resolve raw vector payloads for graph node ids
+        from THIS node's local vlog (vector value-log). Used by the vlog scrub
+        to repair a replica whose local vlog lost payloads (dangling ROLE_VEC
+        handles) by re-fetching them from a healthy peer — the row state is
+        raft-replicated and digest-identical across replicas, so only this
+        side-file payload channel can heal such damage.
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def GraphSearch(self, request, context):
         """HNSW nearest neighbor search on graph vectors.
         """
@@ -2515,6 +2532,11 @@ def add_StateletServicer_to_server(servicer, server):
                     servicer.GraphBatchRead,
                     request_deserializer=statelet__pb2.GraphBatchReadRequest.FromString,
                     response_serializer=statelet__pb2.GraphBatchReadResponse.SerializeToString,
+            ),
+            'GraphVlogFetch': grpc.unary_unary_rpc_method_handler(
+                    servicer.GraphVlogFetch,
+                    request_deserializer=statelet__pb2.GraphVlogFetchRequest.FromString,
+                    response_serializer=statelet__pb2.GraphVlogFetchResponse.SerializeToString,
             ),
             'GraphSearch': grpc.unary_unary_rpc_method_handler(
                     servicer.GraphSearch,
@@ -5809,6 +5831,33 @@ class Statelet:
             '/statelet.v1.Statelet/GraphBatchRead',
             statelet__pb2.GraphBatchReadRequest.SerializeToString,
             statelet__pb2.GraphBatchReadResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def GraphVlogFetch(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/statelet.v1.Statelet/GraphVlogFetch',
+            statelet__pb2.GraphVlogFetchRequest.SerializeToString,
+            statelet__pb2.GraphVlogFetchResponse.FromString,
             options,
             channel_credentials,
             insecure,

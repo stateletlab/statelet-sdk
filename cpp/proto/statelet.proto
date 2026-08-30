@@ -1,16 +1,11 @@
-// Copyright 2024 Statelet Contributors
+// Copyright 2026 Statelet Contributors
+// SPDX-License-Identifier: FSL-1.1-ALv2
 //
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Licensed under the Functional Source License, Version 1.1, ALv2 Future
+// License (FSL-1.1-ALv2); see the LICENSE file. You may use, copy, modify
+// and redistribute this software for any Permitted Purpose other than a
+// Competing Use as defined in the LICENSE. Each version becomes available
+// under the Apache License, Version 2.0 two years after its release.
 
 syntax = "proto3";
 
@@ -579,6 +574,14 @@ service Statelet {
   // graph write so a partial failure can be compensated (rows restored).
   rpc GraphBatchRead(GraphBatchReadRequest) returns (GraphBatchReadResponse);
 
+  // Internal data-node RPC: resolve raw vector payloads for graph node ids
+  // from THIS node's local vlog (vector value-log). Used by the vlog scrub
+  // to repair a replica whose local vlog lost payloads (dangling ROLE_VEC
+  // handles) by re-fetching them from a healthy peer — the row state is
+  // raft-replicated and digest-identical across replicas, so only this
+  // side-file payload channel can heal such damage.
+  rpc GraphVlogFetch(GraphVlogFetchRequest) returns (GraphVlogFetchResponse);
+
   // HNSW nearest neighbor search on graph vectors.
   rpc GraphSearch(GraphSearchRequest) returns (GraphSearchResponse);
 
@@ -1032,6 +1035,11 @@ message ShardStateDigestRequest {
   bytes  start_key = 4; // leader's scope — follower must hold the SAME range
   bytes  end_key   = 5;
   uint32 algo      = 6; // 1 = xxh3-128 over (cf-name, key, value) length-framed stream
+  // Op-stream fast path: answer with ONLY the responder's op-stream digest
+  // triple (op_* fields below) and skip the full state scan. Used by suspect
+  // rejoiners for the O(1) verification round; a responder without a chain
+  // answers op_available=false and the requester falls back to the scan.
+  bool   op_stream_only = 7;
 }
 
 message ShardStateDigestResponse {
@@ -1047,6 +1055,28 @@ message ShardStateDigestResponse {
   // must hold identical state, so equal positions + unequal digests can only
   // mean one side durably lost applied data.
   uint64 last_applied = 4;
+  // Responder's OWN scope keys, echoed on every reply that had a scope to
+  // digest (including a scope-mismatch `comparable=false`). Lets the
+  // requester DIAGNOSE a mismatch — "my range is stale, the scope reconciler
+  // will correct it" — instead of retrying an anonymous incomparable forever.
+  // Empty on legacy responders (pre-echo builds): not proof of agreement.
+  bytes  start_key = 5;
+  bytes  end_key   = 6;
+  // Op-stream digest triple (see raft::state_machine's op-stream block):
+  // an order-independent xxh3-128 sum over the decodable raft entries the
+  // responder applied in (op_anchor, op_covers]. Comparable only between
+  // replicas whose op_anchor AND op_covers match — op_covers, not
+  // last_applied, is the chain's position: trailing empty (election no-op)
+  // entries advance the raft applied counter but carry no state, so two
+  // replicas with equal triples hold identical state even when their
+  // applied counters differ by a no-op tail. Filled when op_stream_only was
+  // requested and the responder has a live chain; op_available=false (or
+  // absent, on legacy responders) means "no chain — use the full state
+  // digest instead".
+  bool   op_available = 7;
+  uint64 op_anchor    = 8;
+  bytes  op_digest    = 9; // 16 bytes (xxh3-128 sum, little-endian)
+  uint64 op_covers    = 10;
 }
 
 // One chunk of a streamed InstallSnapshot transfer. Raft metadata rides on
@@ -1235,7 +1265,18 @@ message SubscribeShardEventsRequest {
 // On initial connection the server first replays the full current state as
 // synthetic events before streaming live updates.
 message ShardEventProto {
-  bytes op_json = 1; // serde_json-encoded MetadataOp
+  bytes op_json = 1; // serde_json-encoded MetadataOp; empty = heartbeat
+  // Monotonic cursor: the authoritative metadata registry_epoch AFTER this op
+  // was applied (ops), the snapshot's capture cursor (snapshot items), or the
+  // server's current cursor (heartbeats). 0 = legacy server without cursor
+  // support — subscribers fall back to gap-blind behavior. Lets a subscriber
+  // DETECT a missed op (seq jump) instead of silently serving a stale cache:
+  // 2026-08-12 incident, the gateway sat exactly one epoch behind for hours
+  // while heartbeats kept its idle watchdog satisfied.
+  uint64 seq = 2;
+  // True for the initial full-state replay items sent at stream start (all
+  // carry the same seq = capture cursor); false for live ops and heartbeats.
+  bool snapshot = 3;
 }
 
 // ─── Vector Index ────────────────────────────────────────────────────────────
@@ -1744,7 +1785,16 @@ message TrainCoarseRoutingResponse {
 
 // ─── GetNodeStats ──────────────────────────────────────────────────────────
 
-message CheckpointRequest {}
+message CheckpointRequest {
+  // Optional (enterprise backup, statelet-ee): when non-empty, after the
+  // flush/floor pass the node ALSO writes an online point-in-time checkpoint
+  // image (a self-contained, re-openable DB directory) under this root, as
+  // `<backup_root>/<utc timestamp>-node<id>/`, then prunes old images beyond
+  // `backup_retain`. Empty = the historical flush/GC-only behavior.
+  string backup_root = 1;
+  // Images to keep under backup_root (per node). 0 = keep everything.
+  uint32 backup_retain = 2;
+}
 
 message CheckpointResponse {
   // Shards whose state machine flush was triggered.
@@ -1757,6 +1807,10 @@ message CheckpointResponse {
   // Total WAL bytes before / after.
   uint64 wal_bytes_before = 5;
   uint64 wal_bytes_after = 6;
+  // Enterprise backup result (empty when no backup_root was requested):
+  // absolute path of the image written by this node, and its total bytes.
+  string backup_path = 7;
+  uint64 backup_bytes = 8;
 }
 
 message GetNodeStatsRequest {}
@@ -1766,11 +1820,20 @@ message CfStatsProto {
   string cf_name               = 2;
   uint64 memtable_memory_bytes = 3;
   uint64 memtable_entry_count  = 4;
+  // Plain LSM `.sst` files ONLY — `.gsst` and vlog are reported separately
+  // below (they used to be lumped/absent, hiding several GB of graph + vlog
+  // disk from the dashboard).
   uint64 sst_file_count        = 5;
   uint64 sst_total_bytes       = 6;
   uint64 sst_entry_count       = 7;
   // Column family type: 0=System, 1=User, 2=Graph
   uint32 cf_type               = 8;
+  // Graph `.gsst` files (HNSW adjacency + SQ codes).
+  uint64 gsst_file_count       = 9;
+  uint64 gsst_total_bytes      = 10;
+  // Vector value-log segments (`vlog/<sub>/*.vlog`, outside the SST version).
+  uint64 vlog_file_count       = 11;
+  uint64 vlog_total_bytes      = 12;
 }
 
 message VectorIndexStatsProto {
@@ -1796,6 +1859,22 @@ message ShardStatsProto {
   // SST bytes are tallied per CF per node and attributed wholesale to the
   // lowest shard id. An estimate, and per replica.
   uint64                  approx_bytes = 3;
+  // ── Raft replica health of THIS node's replica (additive; absent/zero from
+  //    pre-extension nodes). What the admin console's shard-health view reads.
+  // Leader of the shard's raft group right now.
+  bool is_leader = 4;
+  // Reads answer Unavailable: the replica booted unclean (state-suspect) or
+  // proved a durability hole, and has not yet digest-verified / re-installed.
+  bool read_quarantined = 5;
+  // PROVEN divergence (boot-hole proof or digest refutation), awaiting a
+  // snapshot heal. Strictly stronger than `read_quarantined`.
+  bool state_diverged = 6;
+  // An InstallSnapshot transfer is landing on this replica right now
+  // (spooling frames or installing) — "copying data".
+  bool snapshot_receiving = 7;
+  // Highest raft log index applied on this replica; comparing across replicas
+  // of one shard shows replication lag.
+  uint64 applied_index = 8;
 }
 
 message GetNodeStatsResponse {
@@ -3512,6 +3591,21 @@ message CreateGraphIndexRequest {
   // could not be obtained; the node then allocates locally and the applier's
   // id translation covers the difference.
   uint32 cf_id_hint = 13;
+  // Partitioned vector index (ee, docs/partitioned-vector-index-design.md):
+  // number of hash partitions. 0/1 = replicated whole-graph mode (default,
+  // OSS behavior). >= 2 requires an ee PartitionPolicy registered at the
+  // gateway; each partition is a shared-CF sub-index of the base CF and the
+  // gateway fans reads out per partition and routes writes by assigner.
+  uint32 partitions = 14;
+  // Distributed partition layout (ee,
+  // docs/distributed-partitioned-graph-design.md): with `partitions >= 2`,
+  // give each partition its OWN dedicated CF + shard (raft group) instead of
+  // folding all P into the base CF's shared-sub family — a single logical
+  // index's memory footprint and write throughput then scale across data
+  // nodes. Group count is governed by the metadata-side
+  // `max_distributed_partition_groups` budget; layout cannot be changed
+  // after create (repartitioning = rebuild into a new name).
+  bool distributed_partitions = 15;
 }
 
 message CreateGraphIndexResponse {
@@ -3632,11 +3726,32 @@ message GraphBatchReadResponse {
   repeated GraphBatchReadValue values = 1;
 }
 
+// Vlog scrub peer-repair (see rpc GraphVlogFetch).
+message GraphVlogFetchRequest {
+  string graph = 1;             // graph index name (CF ids are node-local)
+  repeated uint64 node_ids = 2;
+}
+
+message GraphVlogVector {
+  uint64 node_id = 1;
+  uint64 generation = 2;        // handle generation the payload belongs to
+  bytes payload = 3;            // raw f32 little-endian vector bytes
+}
+
+message GraphVlogFetchResponse {
+  repeated GraphVlogVector vectors = 1;
+}
+
 message GraphSearchRequest {
   string graph_name     = 1;
   repeated float query  = 2;
   uint32 k              = 3;
   uint32 ef             = 4; // 0 = use default ef_search
+  // Partitioned graphs only: tolerate unreachable partitions and return the
+  // union of the reachable ones (response carries partial=true + the missing
+  // partition ids). Default (false) = strict: any partition failure fails
+  // the query. Ignored for replicated (non-partitioned) graphs.
+  bool best_effort      = 5;
 }
 
 message GraphSearchResult {
@@ -3646,6 +3761,10 @@ message GraphSearchResult {
 
 message GraphSearchResponse {
   repeated GraphSearchResult results = 1;
+  // Partitioned + best_effort only: true when one or more partitions were
+  // unreachable and `results` is the union of the reachable subset.
+  bool partial = 2;
+  repeated uint32 missing_partitions = 3;
 }
 
 // ─── Vector-anchored multi-hop expansion (GraphRAG) ───────────────────────────
